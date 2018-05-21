@@ -1,0 +1,23 @@
+{
+  "name": "NYNJA-ico-smart-contracts",
+  "version": "0.0.1",
+  "description": "NYNJA Coin smart contracts",
+  "repository": "git@github.com:NYNJA-MC/ico-smart-contracts.git",
+  "author": "Jose Perez <jose.perez@diginex.com>",
+  "main": "truffle.js",
+  "scripts": {
+    "build": "scripts/build.sh",
+    "test": "scripts/test.sh"
+  },
+  "homepage": "https://github.com/NYNJA-MC/ico-smart-contracts",
+  "license": "MIT",
+  "dependencies": {
+    "bignumber.js": "^5.0.0",
+    "chai": "^4.1.2",
+    "chai-as-promised": "^7.1.1",
+    "chai-bignumber": "^2.0.2",
+    "openzeppelin-solidity": "1.9.0",
+    "truffle": "^4.1.8",
+    "web3": "^0.19.1"
+  }
+}
