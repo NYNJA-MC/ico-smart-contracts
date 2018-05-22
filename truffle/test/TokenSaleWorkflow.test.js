@@ -1,14 +1,13 @@
-"use strict";
-
 // @title   TokenSaleWorkflow.test.js
 // @author  Jose Perez - <jose.perez@diginex.com>
 // @dev     Token sale workflow with all token sale smart contracts
+
+"use strict";
 
 const NYNJACoin = artifacts.require('../contracts/NYNJACoin.sol');
 const VestingTrustee = artifacts.require('../contracts/VestingTrustee.sol');
 const ExchangeRate = artifacts.require('../contracts/ExchangeRate.sol');
 const MultiSigWalletWithDailyLimit = artifacts.require('../contracts/MultiSigWalletWithDailyLimit.sol');
-const Web3 = require('web3');
 const time = require('./helpers/time');
 const constants = require('./helpers/constants');
 
@@ -30,7 +29,6 @@ contract('TokenSaleWorkflow', function (accounts) {
     let multisig;
 
     before(async function () {
-        web3 = new Web3(new Web3.providers.HttpProvider());
         token = await NYNJACoin.new(assigner, locker, { from: owner });
         vestingTrustee = await VestingTrustee.new(token.address, vester, { from: owner });
         exchangeRate = await ExchangeRate.new(rateUpdater, { from: owner });

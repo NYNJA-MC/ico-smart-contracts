@@ -4,9 +4,9 @@ import "../../node_modules/openzeppelin-solidity/contracts/math/SafeMath.sol";
 import "../../node_modules/openzeppelin-solidity/contracts/ownership/Ownable.sol";
 import "../../node_modules/openzeppelin-solidity/contracts/token/ERC20/StandardToken.sol";
 
-// @title   NYNJACoin
-// @author  Jose Perez - <jose.perez@diginex.com>
-// @dev     ERC20 token for NYNJA Mobile Communicator token sale.
+/// @title   NYNJACoin
+/// @author  Jose Perez - <jose.perez@diginex.com>
+/// @notice  ERC20 token for NYNJA Mobile Communicator token sale.
 contract NYNJACoin is StandardToken, Ownable {
 
     using SafeMath for uint256;
@@ -25,10 +25,10 @@ contract NYNJACoin is StandardToken, Ownable {
     address public assigner;    // The address allowed to assign or mint tokens during token sale.
     address public locker;      // The address allowed to lock/unlock addresses.
 
-    mapping(address => bool) locked;        // If true, address' tokens cannot be transferred.
+    mapping(address => bool) public locked;        // If true, address' tokens cannot be transferred.
 
-    uint8 public currentTokenSaleId = 0;    // The id of the current token sale.
-    mapping(address => uint8) tokenSaleId;  // In which token sale the address first participated.
+    uint8 public currentTokenSaleId = 0;           // The id of the current token sale.
+    mapping(address => uint8) public tokenSaleId;  // In which token sale the address first participated.
 
     bool public tokenSaleOngoing = false;
 
@@ -42,25 +42,25 @@ contract NYNJACoin is StandardToken, Ownable {
     event AssignerTransferred(address indexed previousAssigner, address indexed newAssigner);
 
 
-    // @dev True if a token sale is ongoing.
+    /// @dev True if a token sale is ongoing.
     modifier tokenSaleIsOngoing() {
         require(tokenSaleOngoing);
         _;
     }
 
-    // @dev True if a token sale is not ongoing.
+    /// @dev True if a token sale is not ongoing.
     modifier tokenSaleIsNotOngoing() {
         require(!tokenSaleOngoing);
         _;
     }
 
-    // @dev Throws if called by any account other than the assigner.
+    /// @dev Throws if called by any account other than the assigner.
     modifier onlyAssigner() {
         require(msg.sender == assigner);
         _;
     }
 
-    // @dev Throws if called by any account other than the locker.
+    /// @dev Throws if called by any account other than the locker.
     modifier onlyLocker() {
         require(msg.sender == locker);
         _;
@@ -77,9 +77,9 @@ contract NYNJACoin is StandardToken, Ownable {
         locker = _locker;
     }
 
-    // @dev Starts a new token sale. Only the owner can start a new token sale. If a token sale
-    //      is ongoing, it has to be ended before a new token sale can be started.
-    // @return True if the operation was successful.
+    /// @dev Starts a new token sale. Only the owner can start a new token sale. If a token sale
+    ///      is ongoing, it has to be ended before a new token sale can be started.
+    /// @return True if the operation was successful.
     function tokenSaleStart() external onlyOwner tokenSaleIsNotOngoing returns(bool) {
         currentTokenSaleId++;
         tokenSaleOngoing = true;
@@ -87,59 +87,64 @@ contract NYNJACoin is StandardToken, Ownable {
         return true;
     }
 
-    // @dev Ends the current token sale. Only the owner can end a token sale.
-    // @return True if the operation was successful.
+    /// @dev Ends the current token sale. Only the owner can end a token sale.
+    /// @return True if the operation was successful.
     function tokenSaleEnd() external onlyOwner tokenSaleIsOngoing returns(bool) {
         emit TokenSaleEnding(currentTokenSaleId);
         tokenSaleOngoing = false;
         return true;
     }
 
-    // @return Returns whether or not a token sale is ongoing.
+    /// @return Returns whether or not a token sale is ongoing.
     function isTokenSaleOngoing() external view returns(bool) {
         return tokenSaleOngoing;
-    }    
+    }
 
-    // @return Returns current token sale id.
+    /// @return Returns current token sale id.
     function getCurrentTokenSaleId() external view returns(uint8) {
         return currentTokenSaleId;
     }
 
-    // @return Returns the id of the last token sale that the address participated in.
+    /// @return Returns the id of the last token sale that the address participated in.
     function getAddressTokenSaleId(address _address) external view returns(uint8) {
         return tokenSaleId[_address];
     }
 
-    // @dev Allows the current owner to change the assigner.
-    // @param newAssigner The address of the new assigner.
-    // @return True if the operation was successful.
-    function transferAssigner(address newAssigner) external onlyOwner returns(bool) {
-        require(newAssigner != address(0));
+    /// @dev Allows the current owner to change the assigner.
+    /// @param _newAssigner The address of the new assigner.
+    /// @return True if the operation was successful.
+    function transferAssigner(address _newAssigner) external onlyOwner returns(bool) {
+        require(_newAssigner != address(0));
 
-        emit AssignerTransferred(assigner, newAssigner);
-        assigner = newAssigner;
+        emit AssignerTransferred(assigner, _newAssigner);
+        assigner = _newAssigner;
         return true;
     }
 
-    // @dev Function to mint tokens. It can only be called by the assigner during an ongoing token sale.
-    // @param _to The address that will receive the minted tokens.
-    // @param _amount The amount of tokens to mint.
-    // @return A boolean that indicates if the operation was successful.
+    /// @dev Function to mint tokens. It can only be called by the assigner during an ongoing token sale.
+    /// @param _to The address that will receive the minted tokens.
+    /// @param _amount The amount of tokens to mint.
+    /// @return A boolean that indicates if the operation was successful.
     function mint(address _to, uint256 _amount) public onlyAssigner tokenSaleIsOngoing returns(bool) {
         totalSupply_ = totalSupply_.add(_amount);
         require(totalSupply_ <= MAX_TOKEN_SUPPLY);
 
         balances[_to] = balances[_to].add(_amount);
-        tokenSaleId[_to] = currentTokenSaleId;
+
+        if (tokenSaleId[_to] == 0) {
+            tokenSaleId[_to] = currentTokenSaleId;
+        }
+        require(tokenSaleId[_to] == currentTokenSaleId);
+
         emit Mint(_to, _amount);
         emit Transfer(address(0), _to, _amount);
         return true;
     }
 
-    // @dev Mints tokens for several addresses in one single call.
-    // @param _to address[] The addresses that get the tokens.
-    // @param _amount address[] The number of tokens to be minted.
-    // @return A boolean that indicates if the operation was successful.
+    /// @dev Mints tokens for several addresses in one single call.
+    /// @param _to address[] The addresses that get the tokens.
+    /// @param _amount address[] The number of tokens to be minted.
+    /// @return A boolean that indicates if the operation was successful.
     function mintInBatches(address[] _to, uint256[] _amount) external onlyAssigner tokenSaleIsOngoing returns(bool) {
         require(_to.length > 0);
         require(_to.length == _amount.length);
@@ -150,10 +155,10 @@ contract NYNJACoin is StandardToken, Ownable {
         return true;
     }
 
-    // @dev Function to assign tokens
-    // @param _to The address that will receive the assigned tokens.
-    // @param _amount The amount of tokens to assign.
-    // @return True if the operation was successful.
+    /// @dev Function to assign tokens
+    /// @param _to The address that will receive the assigned tokens.
+    /// @param _amount The amount of tokens to assign.
+    /// @return True if the operation was successful.
     function assign(address _to, uint256 _amount) public onlyAssigner tokenSaleIsOngoing returns(bool) {
         uint256 delta = 0;
         if (balances[_to] < _amount) {
@@ -166,17 +171,21 @@ contract NYNJACoin is StandardToken, Ownable {
         require(totalSupply_ <= MAX_TOKEN_SUPPLY);
 
         balances[_to] = _amount;
-        tokenSaleId[_to] = currentTokenSaleId;
+
+        if (tokenSaleId[_to] == 0) {
+            tokenSaleId[_to] = currentTokenSaleId;
+        }
+        require(tokenSaleId[_to] == currentTokenSaleId);
 
         emit Assign(_to, _amount);
         emit Transfer(address(0), _to, _amount);
         return true;
     }
 
-    // @dev Assigns tokens to several addresses in one call.
-    // @param _to address[] The addresses that get the tokens.
-    // @param _amount address[] The number of tokens to be assigned.
-    // @return True if the operation was successful.
+    /// @dev Assigns tokens to several addresses in one call.
+    /// @param _to address[] The addresses that get the tokens.
+    /// @param _amount address[] The number of tokens to be assigned.
+    /// @return True if the operation was successful.
     function assignInBatches(address[] _to, uint256[] _amount) external onlyAssigner tokenSaleIsOngoing returns(bool) {
         require(_to.length > 0);
         require(_to.length == _amount.length);
@@ -188,20 +197,21 @@ contract NYNJACoin is StandardToken, Ownable {
     }
 
     // @dev Allows the current owner to change the locker.
-    // @param newLocker The address of the new locker.
+    // @param _newLocker The address of the new locker.
     // @return True if the operation was successful.
-    function transferLocker(address newLocker) external onlyOwner returns(bool) {
-        require(newLocker != address(0));
+    function transferLocker(address _newLocker) external onlyOwner returns(bool) {
+        require(_newLocker != address(0));
 
-        emit LockerTransferred(locker, newLocker);
-        locker = newLocker;
+        emit LockerTransferred(locker, _newLocker);
+        locker = _newLocker;
         return true;
     }
 
-    // @dev Locks an address from token trading. Only addresses participating in the current token sale can be locked.
-    //      Only the locker account can lock addresses.
-    // @param _address address The address to lock.
-    // @return True if the operation was successful.
+    /// @dev Locks an address. A locked address cannot transfer its tokens or other addresses' tokens out.
+    ///      Only addresses participating in the current token sale can be locked.
+    ///      Only the locker account can lock addresses and only during the token sale.
+    /// @param _address address The address to lock.
+    /// @return True if the operation was successful.
     function lockAddress(address _address) public onlyLocker tokenSaleIsOngoing returns(bool) {
         require(tokenSaleId[_address] == currentTokenSaleId);
         require(!locked[_address]);
@@ -211,9 +221,10 @@ contract NYNJACoin is StandardToken, Ownable {
         return true;
     }
 
-    // @dev Unlocks an address to allow trading its tokens. Only the locker account can unlock addresses.
-    // @param _address address The address to unlock.
-    // @return True if the operation was successful.
+    /// @dev Unlocks an address so that its owner can transfer tokens out again.
+    ///      Addresses can be unlocked any time. Only the locker account can unlock addresses
+    /// @param _address address The address to unlock.
+    /// @return True if the operation was successful.
     function unlockAddress(address _address) public onlyLocker returns(bool) {
         require(locked[_address]);
         locked[_address] = false;
@@ -221,9 +232,9 @@ contract NYNJACoin is StandardToken, Ownable {
         return true;
     }
 
-    // @dev Locks several addresses from trading in one single call.
-    // @param _addresses address[] The addresses to lock from trading.
-    // @return True if the operation was successful.
+    /// @dev Locks several addresses in one single call.
+    /// @param _addresses address[] The addresses to lock.
+    /// @return True if the operation was successful.
     function lockInBatches(address[] _addresses) external onlyLocker returns(bool) {
         require(_addresses.length > 0);
         for (uint i = 0; i < _addresses.length; i++) {
@@ -232,9 +243,9 @@ contract NYNJACoin is StandardToken, Ownable {
         return true;
     }
 
-    // @dev Unlocks several addresses from trading in one single call.
-    // @param _addresses address[] The addresses to unlock from trading.
-    // @return True if the operation was successful.
+    /// @dev Unlocks several addresses in one single call.
+    /// @param _addresses address[] The addresses to unlock.
+    /// @return True if the operation was successful.
     function unlockInBatches(address[] _addresses) external onlyLocker returns(bool) {
         require(_addresses.length > 0);
         for (uint i = 0; i < _addresses.length; i++) {
@@ -243,17 +254,18 @@ contract NYNJACoin is StandardToken, Ownable {
         return true;
     }
 
-    // @dev Checks whether or not the given address is locked.
-    // @param _address address The address to be checked.
-    // @return Boolean indicating whether or not the address is locked.
+    /// @dev Checks whether or not the given address is locked.
+    /// @param _address address The address to be checked.
+    /// @return Boolean indicating whether or not the address is locked.
     function isLocked(address _address) external view returns(bool) {
         return locked[_address];
     }
 
-    // @dev Transfers tokens to the specified address. It prevents transferring tokens from a locked address.
-    //      Locked addresses can be transferred tokens.
-    // @param _to The address to transfer tokens to.
-    // @param _value The number of tokens to be transferred.
+    /// @dev Transfers tokens to the specified address. It prevents transferring tokens from a locked address.
+    ///      Locked addresses can receive tokens.
+    ///      Current token sale's addresses cannot receive or send tokens until the token sale ends.
+    /// @param _to The address to transfer tokens to.
+    /// @param _value The number of tokens to be transferred.
     function transfer(address _to, uint256 _value) public returns(bool) {
         require(!locked[msg.sender]);
         if (tokenSaleOngoing) {
@@ -263,11 +275,13 @@ contract NYNJACoin is StandardToken, Ownable {
         return super.transfer(_to, _value);
     }
 
-    // @dev Transfers tokens from one address to another.  It prevents transferring tokens if the caller is locked and
-    //      from a locked address.
-    // @param _from address The address to transfer tokens from.
-    // @param _to address The address to transfer tokens to.
-    // @param _value The number of tokens to be transferred.
+    /// @dev Transfers tokens from one address to another. It prevents transferring tokens if the caller is locked or
+    ///      if the allowed address is locked.
+    ///      Locked addresses can receive tokens.
+    ///      Current token sale's addresses cannot receive or send tokens until the token sale ends.
+    /// @param _from address The address to transfer tokens from.
+    /// @param _to address The address to transfer tokens to.
+    /// @param _value The number of tokens to be transferred.
     function transferFrom(address _from, address _to, uint256 _value) public returns(bool) {
         require(!locked[msg.sender]);
         require(!locked[_from]);

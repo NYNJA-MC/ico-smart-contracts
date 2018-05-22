@@ -1,6 +1,6 @@
 "use strict";
 
-// @notice Tests the functionality inherited by NYNJACoin from openzeppelin-solidity v1.9.0 StandardToken implementation
+// @notice Tests the functionality inherited by NYNJACoin from openzeppelin-solidity StandardToken implementation
 
 const assertRevert = require('./helpers/assertRevert');
 const NYNJACoin = artifacts.require('NYNJACoin');

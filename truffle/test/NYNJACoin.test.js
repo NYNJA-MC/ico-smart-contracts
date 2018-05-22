@@ -1,151 +1,234 @@
-// @title   NYNJACoin.test.js
-// @author  Jose Perez - <jose.perez@diginex.com>
+/// @title  NYNJACoin.test.js
+/// @author Jose Perez - <jose.perez@diginex.com>
+/// @notice NYNJACoin smart contract unit test
 
-"use strict";
+'use strict';
 
-const BigNumber = require('bignumber.js');
-const NYNJACoin = artifacts.require('../contracts/NYNJACoin.sol');
-const assertRevert = require('./helpers/assertRevert');
-
+const BigNumber = web3.BigNumber;
 require('chai')
-    .use(require('chai-as-promised'))
     .use(require('chai-bignumber')(BigNumber))
+    .use(require('chai-as-promised'))
     .should();
-
+import assertRevert from './helpers/assertRevert';
+import expectEvent from './helpers/expectEvent';
+const NYNJACoin = artifacts.require('../contracts/NYNJACoin.sol');
 
 contract('NYNJACoin tests', function (accounts) {
+    const NYNJA_TOKENS_SUPPLY = 5000000000; // 5 billion tokens
 
-    const NUM_PARTICIPANTS = 5
-
-    const owner = accounts[9];
-    const assigner = accounts[8];
-    const locker = accounts[7];
-    const someoneElse = accounts[6];
-    const participants = accounts.slice(0, NUM_PARTICIPANTS + 1);
+    const owner = accounts[1];
+    const assigner = accounts[2];
+    const locker = accounts[3];
+    const someoneElse = accounts[4];
+    const participants = accounts.slice(5, 15);  // participants in the first token sale
+    const participants2 = accounts.slice(15, 25); // participants in the second token sale
     const tokenDecimals = 18;
     const tokenUnit = new BigNumber(10).pow(tokenDecimals);
-    const maxTokenSupply = tokenUnit.times(5000000000); // 5 billion tokens
+    const maxTokenMinUnitSupply = tokenUnit.times(NYNJA_TOKENS_SUPPLY);
 
     let token;
 
-    before(function () {
-        for (let i = 0; i < accounts.length; i++) {
-            console.log(`${i}: ${accounts[i]}`);
-        }
-    });
-
-    async function checkTokenSaleStart(tokenSaleStart, tokenSaleId) {
-        assert.equal(tokenSaleStart.logs[0].event, 'TokenSaleStarting');
-        assert.equal(tokenSaleStart.logs[0].args.tokenSaleId.valueOf(), tokenSaleId);
+    async function checkTokenSaleStart(tokenSaleEndStart, tokenSaleId) {
+        const eventLog = await expectEvent.inLogs(tokenSaleEndStart.logs, 'TokenSaleStarting');
+        eventLog.args.tokenSaleId.should.be.bignumber.equal(tokenSaleId);
         const currentTokenSaleId = await token.currentTokenSaleId.call();
-        assert.equal(currentTokenSaleId, tokenSaleId);
+        currentTokenSaleId.should.be.bignumber.equal(tokenSaleId);
     }
 
     async function checkTokenSaleEnd(tokenSaleEnd, tokenSaleId) {
-        assert.equal(tokenSaleEnd.logs[0].event, 'TokenSaleEnding');
-        assert.equal(tokenSaleEnd.logs[0].args.tokenSaleId.valueOf(), tokenSaleId);
+        const eventLog = await expectEvent.inLogs(tokenSaleEnd.logs, 'TokenSaleEnding');
+        eventLog.args.tokenSaleId.should.be.bignumber.equal(tokenSaleId);
         const currentTokenSaleId = await token.currentTokenSaleId.call();
-        assert.equal(currentTokenSaleId, tokenSaleId);
+        currentTokenSaleId.should.be.bignumber.equal(tokenSaleId);
     }
 
     async function checkTransferAssigner(transferAssigner, assigner, newAssigner) {
-        assert.equal(transferAssigner.logs[0].event, 'AssignerTransferred');
-        assert.equal(transferAssigner.logs[0].args.previousAssigner.valueOf(), assigner);
-        assert.equal(transferAssigner.logs[0].args.newAssigner.valueOf(), newAssigner);
+        const eventLog = await expectEvent.inLogs(transferAssigner.logs, 'AssignerTransferred');
+        assert.equal(eventLog.args.previousAssigner.valueOf(), assigner);
+        assert.equal(eventLog.args.newAssigner.valueOf(), newAssigner);
         const currentAssigner = await token.assigner.call();
         assert.equal(currentAssigner, newAssigner);
     }
 
     async function checkTransferLocker(transferLocker, locker, newLocker) {
-        assert.equal(transferLocker.logs[0].event, 'LockerTransferred');
-        assert.equal(transferLocker.logs[0].args.previousLocker.valueOf(), locker);
-        assert.equal(transferLocker.logs[0].args.newLocker.valueOf(), newLocker);
+        const eventLog = await expectEvent.inLogs(transferLocker.logs, 'LockerTransferred');
+        assert.equal(eventLog.args.previousLocker.valueOf(), locker);
+        assert.equal(eventLog.args.newLocker.valueOf(), newLocker);
         const currentLocker = await token.locker.call();
         assert.equal(currentLocker, newLocker);
     }
 
     async function checkTransferOwnership(transferOwnership, owner, newOwner) {
-        assert.equal(transferOwnership.logs[0].event, 'OwnershipTransferred');
-        assert.equal(transferOwnership.logs[0].args.previousOwner.valueOf(), owner);
-        assert.equal(transferOwnership.logs[0].args.newOwner.valueOf(), newOwner);
+        const eventLog = await expectEvent.inLogs(transferOwnership.logs, 'OwnershipTransferred');
+        assert.equal(eventLog.args.previousOwner.valueOf(), owner);
+        assert.equal(eventLog.args.newOwner.valueOf(), newOwner);
         const currentOwner = await token.owner.call();
         assert.equal(currentOwner, newOwner);
     }
 
     async function checkMint(mint, address, mintedTokens, expectedBalance) {
-        assert.equal(mint.logs[0].event, 'Mint');
-        assert.equal(mint.logs[0].args.to.valueOf(), address);
-        assert.equal(mint.logs[0].args.amount.valueOf(), mintedTokens);
-        assert.equal(mint.logs[1].event, 'Transfer');
-        assert.equal(mint.logs[1].args.from.valueOf(), 0x0);
+        const eventLog1 = await expectEvent.inLogs(mint.logs, 'Mint');
+        assert.equal(eventLog1.args.to.valueOf(), address);
+        mintedTokens.should.be.bignumber.equal(eventLog1.args.amount.valueOf());
+        const eventLog2 = await expectEvent.inLogs(mint.logs, 'Transfer');
+        assert.equal(eventLog2.args.from.valueOf(), 0x0);
+        assert.equal(eventLog2.args.to.valueOf(), address);
+        mintedTokens.should.be.bignumber.equal(eventLog2.args.value.valueOf());
+
         await checkBalance(address, expectedBalance);
-        let currentTokenSaleId = (await token.getCurrentTokenSaleId({ from: someoneElse })).toNumber();;
-        let addressTokenSaleId = (await token.getAddressTokenSaleId(address, { from: someoneElse })).toNumber();
-        assert.equal(addressTokenSaleId, currentTokenSaleId, 'Address token sale ID should be equal to the current token sale ID');
+
+        let currentTokenSaleId = await token.getCurrentTokenSaleId({ from: someoneElse });
+        let addressTokenSaleId = await token.getAddressTokenSaleId(address, { from: someoneElse });
+        currentTokenSaleId.should.be.bignumber.equal(addressTokenSaleId);
     }
 
-    async function checkAssign(assign, address, numTokens) {
-        assert.equal(assign.logs[0].event, 'Assign');
-        assert.equal(assign.logs[0].args.to.valueOf(), address);
-        assert.equal(assign.logs[0].args.amount.valueOf(), numTokens);
-        assert.equal(assign.logs[1].event, 'Transfer');
-        assert.equal(assign.logs[1].args.from.valueOf(), 0x0);
-        await checkBalance(address, numTokens);
-        let currentTokenSaleId = (await token.getCurrentTokenSaleId({ from: someoneElse })).toNumber();;
-        let addressTokenSaleId = (await token.getAddressTokenSaleId(address, { from: someoneElse })).toNumber();
+    async function checkAssign(assign, address, expectedBalance) {
+        const eventLog1 = await expectEvent.inLogs(assign.logs, 'Assign');
+        assert.equal(eventLog1.args.to.valueOf(), address);
+        expectedBalance.should.be.bignumber.equal(eventLog1.args.amount.valueOf());
+        const eventLog2 = await expectEvent.inLogs(assign.logs, 'Transfer');
+        assert.equal(eventLog2.args.from.valueOf(), 0x0);
+        assert.equal(eventLog2.args.to.valueOf(), address);
+        expectedBalance.should.be.bignumber.equal(eventLog2.args.value.valueOf());
+
+        await checkBalance(address, expectedBalance);
+
+        let currentTokenSaleId = await token.getCurrentTokenSaleId({ from: someoneElse });
+        let addressTokenSaleId = await token.getAddressTokenSaleId(address, { from: someoneElse });
+        currentTokenSaleId.should.be.bignumber.equal(addressTokenSaleId);
     }
 
-    function checkTransfer(transfer, _to, _amount, _from) {
-        assert.equal(transfer.logs[0].event, 'Transfer');
-        assert.equal(transfer.logs[0].args.from.valueOf(), _from);
-        assert.equal(transfer.logs[0].args.to.valueOf(), _to);
-        assert.equal(transfer.logs[0].args.value.valueOf(), _amount);
+    async function assertedMint(address, amount) {
+        const expectedTotalSupply = (await token.totalSupply({ from: someoneElse })).plus(amount);
+        const expectedBalanceOf = (await token.balanceOf(address, { from: someoneElse })).plus(amount);
+        const mint = await token.mint(address, amount, { from: assigner });
+        await checkMint(mint, address, amount, expectedBalanceOf);
+        expectedTotalSupply.should.be.bignumber.equal(await token.totalSupply({ from: someoneElse }));
     }
 
-    async function checkBalance(address, numTokens) {
-        const balance = await token.balanceOf(address);
-        assert.equal(new BigNumber(balance).toFixed(), new BigNumber(numTokens).toFixed());
+    async function assertedAssign(address, amount) {
+        const balanceDiff = new BigNumber(amount).minus(await token.balanceOf(address, { from: someoneElse }));
+        const expectedTotalSupply = (await token.totalSupply({ from: someoneElse })).plus(balanceDiff);
+        const assign = await token.assign(address, amount, { from: assigner });
+        await checkAssign(assign, address, amount);
+        expectedTotalSupply.should.be.bignumber.equal(await token.totalSupply({ from: someoneElse }));
     }
 
-    async function checkTotalSupply(totalNumTokens) {
-        const totalNumTokens2 = await token.totalSupply();
-        assert.equal(totalNumTokens2, totalNumTokens);
+    async function checkTransfer(transfer, to, amount, from) {
+        const eventLog = await expectEvent.inLogs(transfer.logs, 'Transfer');
+        assert.equal(eventLog.args.from.valueOf(), from);
+        assert.equal(eventLog.args.to.valueOf(), to);
+        amount.should.be.bignumber.equal(eventLog.args.value.valueOf());
+    }
+
+    async function assertedTransfer(to, amount, from) {
+        const expectedBalanceTo = (await token.balanceOf(to, { from: someoneElse })).plus(amount);
+        const expectedBalanceFrom = (await token.balanceOf(from, { from: someoneElse })).minus(amount);
+        const expectedTotalSupply = await token.totalSupply({ from: someoneElse });
+
+        const transfer = await token.transfer(to, amount, { from: from });
+        await checkTransfer(transfer, to, 1, from);
+
+        expectedBalanceTo.should.be.bignumber.equal(await token.balanceOf(to, { from: someoneElse }));
+        expectedBalanceFrom.should.be.bignumber.equal(await token.balanceOf(from, { from: someoneElse }));
+        expectedTotalSupply.should.be.bignumber.equal(await token.totalSupply({ from: someoneElse }));
+    }
+
+    async function assertedTransferFrom(to, amount, from, approved) {
+        const expectedBalanceTo = (await token.balanceOf(to, { from: someoneElse })).plus(amount);
+        const expectedBalanceFrom = (await token.balanceOf(from, { from: someoneElse })).minus(amount);
+        const expectedBalanceApproved = await token.balanceOf(approved, { from: someoneElse });
+        const expectedTotalSupply = await token.totalSupply({ from: someoneElse });
+
+        const approve = await token.approve(approved, amount, { from: from });
+        // TODO: check approve
+        const transfer = await token.transferFrom(from, to, amount, { from: approved });
+        await checkTransfer(transfer, to, amount, from);
+
+        expectedBalanceTo.should.be.bignumber.equal(await token.balanceOf(to, { from: someoneElse }));
+        expectedBalanceFrom.should.be.bignumber.equal(await token.balanceOf(from, { from: someoneElse }));
+        expectedBalanceApproved.should.be.bignumber.equal(await token.balanceOf(approved, { from: someoneElse }));
+        expectedTotalSupply.should.be.bignumber.equal(await token.totalSupply({ from: someoneElse }));
+    }
+
+    async function checkBalance(address, expectedBalance) {
+        expectedBalance.should.be.bignumber.equal(await token.balanceOf(address, { from: someoneElse }));
+    }
+
+    async function checkTotalSupply(expectedTotalNumTokens) {
+        expectedTotalNumTokens.should.be.bignumber.equal(await token.totalSupply());
     }
 
     async function checkAddressIsLocked(token, address) {
-        const isLocked = await token.isLocked(address);
-        assert.equal(isLocked, true);
+        assert.equal(await token.isLocked(address), true);
     }
 
     async function checkAddressIsUnlocked(token, address) {
-        const isLocked = await token.isLocked(address);
-        assert.equal(isLocked, false);
+        assert.equal(await token.isLocked(address), false);
     }
 
     async function checkLockAddress(lock, token, address) {
-        assert.equal(lock.logs[0].event, 'Lock');
-        assert.equal(lock.logs[0].args.addr.valueOf(), address);
+        const eventLog = await expectEvent.inLogs(lock.logs, 'Lock');
+        assert.equal(eventLog.args.addr.valueOf(), address);
         await checkAddressIsLocked(token, address);
     }
 
     async function checkUnlockAddress(unlock, token, address) {
-        assert.equal(unlock.logs[0].event, 'Unlock');
-        assert.equal(unlock.logs[0].args.addr.valueOf(), address);
+        const eventLog = await expectEvent.inLogs(unlock.logs, 'Unlock');
+        assert.equal(eventLog.args.addr.valueOf(), address);
         await checkAddressIsUnlocked(token, address);
     }
 
-    describe('control accounts', function () {
+    describe('constructor', function () {
+        before(async function () {
+            token = await NYNJACoin.new(assigner, locker, { from: owner });
+        });
 
+        describe('control accounts', async function () {
+            it('check the owner', async function () {
+                assert.equal(await token.owner.call({ from: someoneElse }), owner);
+            });
+
+            it('check the assigner', async function () {
+                assert.equal(await token.assigner.call({ from: someoneElse }), assigner);
+            });
+
+            it('check the locker', async function () {
+                assert.equal(await token.locker.call({ from: someoneElse }), locker);
+            });
+        });
+
+        describe('token supply', async function () {
+            it('initial supply should be 0', async function () {
+                '0'.should.be.bignumber.equal(await token.totalSupply.call({ from: someoneElse }));
+            });
+
+            it('value of max token supply constant in smart contract', async function () {
+                maxTokenMinUnitSupply.should.be.bignumber.equal(await token.MAX_TOKEN_SUPPLY.call({ from: someoneElse }));
+            });
+        });
+
+        describe('token sale id ', async function () {
+            it('check inital token sale id', async function () {
+                '0'.should.be.bignumber.equal(await token.currentTokenSaleId.call({ from: someoneElse }));
+            });
+
+            it('check no token sale is ongoing', async function () {
+                assert.equal(await token.tokenSaleOngoing.call({ from: someoneElse }), false);
+            });
+        });
+    });
+
+    describe('control accounts', function () {
         before(async function () {
             token = await NYNJACoin.new(assigner, locker, { from: owner });
         });
 
         describe('assigner', async function () {
-
             let newAssigner = participants[1];
 
             it('assigner cannot be changed by an account different than owner', async function () {
-                await assertRevert(token.transferAssigner(newAssigner, { from: someoneElse }));
+                await assertRevert(token.transferAssigner(newAssigner, { from: assigner }));
             });
 
             it('new assigner cannot be 0x0', async function () {
@@ -158,13 +241,11 @@ contract('NYNJACoin tests', function (accounts) {
             });
         });
 
-
         describe('locker', async function () {
-
             let newLocker = participants[2];
 
             it('locker cannot be changed by an account different than owner', async function () {
-                await assertRevert(token.transferLocker(newLocker, { from: someoneElse }));
+                await assertRevert(token.transferLocker(newLocker, { from: locker }));
             });
 
             it('new locker cannot be 0x0', async function () {
@@ -177,9 +258,7 @@ contract('NYNJACoin tests', function (accounts) {
             });
         });
 
-
         describe('owner', async function () {
-
             let newOwner = participants[3];
 
             it('owner cannot be changed by an account different than owner', async function () {
@@ -195,162 +274,139 @@ contract('NYNJACoin tests', function (accounts) {
                 await checkTransferOwnership(transferOwnership, owner, newOwner);
             });
         });
-
     });
 
     describe('token sales general workflow', function () {
-
         before(async function () {
             token = await NYNJACoin.new(assigner, locker, { from: owner });
         });
-
+        console.log(`participants = ${JSON.stringify(participants)}`);
         describe('token sale start', function () {
-
-            it('check initial token sale ID equals 0', async function () {
-                assert.equal(await token.getCurrentTokenSaleId({ from: someoneElse }), 0);
-            });
-
             it('accounts different from owner cannot start a token sale', async function () {
                 await assertRevert(token.tokenSaleStart({ from: someoneElse }));
             });
 
+            it('cannot assign/mint if a token sale has not started yet', async function () {
+                await assertRevert(token.assign(participants[0], 1, { from: assigner }));
+                await assertRevert(token.mint(participants[1], 1, { from: assigner }));
+                '0'.should.be.bignumber.equal(await token.totalSupply({ from: someoneElse }));
+            });
+
             it('token sale start', async function () {
-                let tokenSaleStart = await token.tokenSaleStart({ from: owner });
-                await checkTokenSaleStart(tokenSaleStart, 1);
+                await checkTokenSaleStart(await token.tokenSaleStart({ from: owner }), 1);
             });
 
-            it('check current token sale ID', async function () {
-                assert.equal(await token.getCurrentTokenSaleId({ from: someoneElse }), 1);
+            it('check current token sale id', async function () {
+                '1'.should.be.bignumber.equal(await token.getCurrentTokenSaleId({ from: someoneElse }));
             });
 
-            it('cannot start a token sale which has not finished yet', async function () {
+            it('cannot start a new token sale if the current one has not finished yet', async function () {
                 await assertRevert(token.tokenSaleStart({ from: owner }));
             });
         });
 
         describe('during token sale', function () {
-
-            // participants[0]: will be locked and unlocked during tokenSaleId = 1
-            // participants[1]: will be locked during tokenSaleId = 1 and unlocked after tokenSaleId = 1 and before tokenSaleId = 2
-            // participants[2]: will be locked during tokenSaleId = 1 and unlocked during tokenSaleId = 2
-            // participants[4]: will be never be locked
-
             describe('minting/assigning', function () {
-
                 it('accounts different from assigner cannot assign or mint tokens', async function () {
                     await assertRevert(token.assign(participants[0], 1, { from: owner }));
                     await assertRevert(token.mint(participants[1], 1, { from: someoneElse }));
-                    assert.equal(0, (await token.totalSupply({ from: someoneElse })).toNumber());
+                    '0'.should.be.bignumber.equal(await token.totalSupply({ from: someoneElse }));
                 });
 
                 it('minting some tokens', async function () {
                     let expectedTotalSupply = new BigNumber(0);
-                    for (let i = 0; i < NUM_PARTICIPANTS; i++) {
-                        let address = participants[i];
-                        let amount = tokenUnit.times(100).times(i);
-                        expectedTotalSupply = expectedTotalSupply.add(amount);
-                        let mint = await token.mint(address, amount, { from: assigner });
-                        await checkMint(mint, address, amount, amount);
+                    for (let i = 0; i < participants.length; i++) {
+                        const address = participants[i];
+                        const amount = tokenUnit.times(100).times(i);
+                        expectedTotalSupply = expectedTotalSupply.plus(amount);
+                        await assertedMint(address, amount);
                     }
-                    const totalSupply = await token.totalSupply({ from: someoneElse });
-                    totalSupply.should.be.bignumber.equal(expectedTotalSupply);
+                    expectedTotalSupply.should.be.bignumber.equal(await token.totalSupply({ from: someoneElse }));
                 });
 
                 it('assigning some tokens', async function () {
                     let expectedTotalSupply = new BigNumber(0);
-                    for (let i = 0; i < NUM_PARTICIPANTS; i++) {
-                        let address = participants[i];
-                        let amount = tokenUnit.times(200).times(i);
-                        expectedTotalSupply = expectedTotalSupply.add(amount);
-                        let assign = await token.assign(address, amount, { from: assigner });
-                        await checkAssign(assign, address, amount);
+                    for (let i = 0; i < participants.length; i++) {
+                        const address = participants[i];
+                        const amount = tokenUnit.times(200).times(i);
+                        expectedTotalSupply = expectedTotalSupply.plus(amount);
+                        await assertedAssign(address, amount);
                     }
-                    const totalSupply = await token.totalSupply({ from: someoneElse });
-                    totalSupply.should.be.bignumber.equal(expectedTotalSupply);
+                    expectedTotalSupply.should.be.bignumber.equal(await token.totalSupply({ from: someoneElse }));
                 });
 
                 describe('minting/assigning in batches', function () {
-
-                    const addresses = [];
                     const amounts = []
                     let sumAmounts = new BigNumber(0);
                     let totalSupplyBefore;
 
                     before(async function () {
-                        const batchSize = 5;
-                        for (let i = 0; i < batchSize; i++) {
-                            let address = participants[i];
-                            let amount = tokenUnit.times(100).times(i);
-                            addresses.push(address);
+                        for (let i = 0; i < participants.length; i++) {
+                            const amount = tokenUnit.times(100).times(i);
                             amounts.push(amount);
-                            sumAmounts = sumAmounts.add(amount);
+                            sumAmounts = sumAmounts.plus(amount);
                         }
-
                         totalSupplyBefore = new BigNumber(await token.totalSupply({ from: someoneElse }));
                     });
 
                     it('cannot mint/assign a batch of length 0', async function () {
                         await assertRevert(token.mintInBatches([], [], { from: assigner }));
                         await assertRevert(token.assignInBatches([], [], { from: assigner }));
-                        const totalSupplyAfter = new BigNumber(await token.totalSupply({ from: someoneElse }));
-                        totalSupplyAfter.should.be.bignumber.equal(totalSupplyBefore);
+                        totalSupplyBefore.should.be.bignumber.equal(await token.totalSupply({ from: someoneElse }));
                     });
 
-                    it('cannot mint/assign if number of addresses is not equal to number of amounts', async function () {
+                    it('cannot mint/assign a batch if number of addresses is not equal to number of amounts', async function () {
                         let addresses2 = participants.slice(0, 2);
                         let amounts2 = [1, 2, 3];
                         await assertRevert(token.mintInBatches(addresses2, amounts2, { from: assigner }));
                         await assertRevert(token.assignInBatches(addresses2, amounts2, { from: assigner }));
-                        const totalSupplyAfter = new BigNumber(await token.totalSupply({ from: someoneElse }));
-                        totalSupplyAfter.should.be.bignumber.equal(totalSupplyBefore);
+                        totalSupplyBefore.should.be.bignumber.equal(await token.totalSupply({ from: someoneElse }));
                     });
 
                     it('only assigner can mint/assign in batches', async function () {
-                        await assertRevert(token.mintInBatches(addresses, amounts, { from: someoneElse }));
-                        await assertRevert(token.assignInBatches(addresses, amounts, { from: owner }));
-                        const totalSupplyAfter = new BigNumber(await token.totalSupply({ from: someoneElse }));
-                        totalSupplyAfter.should.be.bignumber.equal(totalSupplyBefore);
+                        await assertRevert(token.mintInBatches(participants, amounts, { from: someoneElse }));
+                        await assertRevert(token.assignInBatches(participants, amounts, { from: owner }));
+                        totalSupplyBefore.should.be.bignumber.equal(await token.totalSupply({ from: someoneElse }));
                     });
 
                     it('mint some tokens in batches', async function () {
-                        await token.mintInBatches(addresses, amounts, { from: assigner });
-                        const totalSupplyAfter = new BigNumber(await token.totalSupply({ from: someoneElse }));
-                        totalSupplyAfter.should.be.bignumber.equal(totalSupplyBefore.add(sumAmounts));
+                        await token.mintInBatches(participants, amounts, { from: assigner });
+                        totalSupplyBefore.plus(sumAmounts).should.be.bignumber.equal(await token.totalSupply({ from: someoneElse }));
                     });
 
                     it('assign some tokens in batches', async function () {
-                        await token.assignInBatches(addresses, amounts, { from: assigner });
-                        const totalSupplyAfter = new BigNumber(await token.totalSupply({ from: someoneElse }));
-                        totalSupplyAfter.should.be.bignumber.equal(sumAmounts);
+                        await token.assignInBatches(participants, amounts, { from: assigner });
+                        sumAmounts.should.be.bignumber.equal(await token.totalSupply({ from: someoneElse }));
                     });
                 });
             });
 
             describe('locking', function () {
 
-                it('locking some tokens', async function () {
-                    let lockAddress = await token.lockAddress(participants[0], { from: locker });
-                    await checkLockAddress(lockAddress, token, participants[0], true);
-
-                    lockAddress = await token.lockAddress(participants[1], { from: locker });
-                    await checkLockAddress(lockAddress, token, participants[1], true);
-
-                    lockAddress = await token.lockAddress(participants[2], { from: locker });
-                    await checkLockAddress(lockAddress, token, participants[2], true);
+                it('accounts different from locker cannot lock tokens', async function () {
+                    await assertRevert(token.lockAddress(participants[0], { from: owner }));
+                    await checkAddressIsUnlocked(token, participants[0]);
                 });
 
-                it('cannot lock tokens that have already been locked', async function () {
+                it('locking a single address', async function () {
+                    // NOTE: locking is allowed for participants[0] eventhough its balance is 0 tokens
+                    await checkLockAddress(await token.lockAddress(participants[0], { from: locker }), token, participants[0]);
+                    await checkLockAddress(await token.lockAddress(participants[1], { from: locker }), token, participants[1]);
+                    await checkLockAddress(await token.lockAddress(participants[2], { from: locker }), token, participants[2]);
+                });
+
+                it('cannot lock an address that has already been locked', async function () {
                     await assertRevert(token.lockAddress(participants[0], { from: locker }));
                     await checkAddressIsLocked(token, participants[0]);
                 });
 
-                it('cannot unlock tokens that have not yet been locked', async function () {
-                    await assertRevert(token.unlockAddress(participants[3], { from: locker }));
-                    await checkAddressIsUnlocked(token, participants[3]);
+                it('cannot lock an address that has not participated in a token sale', async function () {
+                    await assertRevert(token.lockAddress(someoneElse, { from: locker }));
+                    await checkAddressIsUnlocked(token, someoneElse);
                 });
 
-                it('accounts different from locker cannot lock tokens', async function () {
-                    await assertRevert(token.lockAddress(participants[3], { from: owner }));
+                it('cannot unlock an address that has not yet been locked', async function () {
+                    await assertRevert(token.unlockAddress(participants[3], { from: locker }));
                     await checkAddressIsUnlocked(token, participants[3]);
                 });
 
@@ -359,76 +415,109 @@ contract('NYNJACoin tests', function (accounts) {
                     await checkAddressIsLocked(token, participants[0]);
                 });
 
-                it('unlocking some tokens during token sale', async function () {
-                    let unlockAddress = await token.unlockAddress(participants[0], { from: locker });
-                    await checkUnlockAddress(unlockAddress, token, participants[0]);
+                it('unlocking a single address', async function () {
+                    await checkUnlockAddress(await token.unlockAddress(participants[0], { from: locker }), token, participants[0]);
                 });
 
                 it('can lock/unlock tokens back during token sale', async function () {
-                    let lockAddress = await token.lockAddress(participants[0], { from: locker });
-                    await checkLockAddress(lockAddress, token, participants[0], true);
-                    let unlockAddress = await token.unlockAddress(participants[0], { from: locker });
-                    await checkUnlockAddress(unlockAddress, token, participants[0]);
+                    await checkLockAddress(await token.lockAddress(participants[0], { from: locker }), token, participants[0], true);
+                    await checkUnlockAddress(await token.unlockAddress(participants[0], { from: locker }), token, participants[0]);
                 });
 
+                describe('locking/unlocking in batches', function () {
+                    let token2;
+
+                    it('lock/unlock a batch', async function () {
+                        token2 = await NYNJACoin.new(assigner, locker, { from: owner });
+                        await token2.tokenSaleStart({ from: owner });
+                        for (let i = 0; i < participants.length; i++) {
+                            await token2.mint(participants[i], 1, { from: assigner });
+                        }
+
+                        await token2.lockInBatches(participants, { from: locker });
+                        for (let i = 0; i < participants.length; i++) {
+                            await checkAddressIsLocked(token2, participants[i]);
+                        }
+                        await token2.unlockInBatches(participants, { from: locker });
+                        for (let i = 0; i < participants.length; i++) {
+                            await checkAddressIsUnlocked(token2, participants[i]);
+                        }
+                    });
+
+                    describe('cannot lock', function () {
+                        before(async function () {
+                            token2 = await NYNJACoin.new(assigner, locker, { from: owner });
+                            await token2.tokenSaleStart({ from: owner });
+                            for (let i = 0; i < participants.length; i++) {
+                                await token2.mint(participants[i], 1, { from: assigner });
+                            }
+                        });
+
+                        it('only locker can lock in batches', async function () {
+                            await assertRevert(token2.lockInBatches(participants, { from: owner }));
+                        });
+
+                        it('cannot lock a batch of length 0', async function () {
+                            await assertRevert(token2.lockInBatches([], { from: locker }));
+                        });
+
+                        after(async function () {
+                            for (let i = 0; i < participants.length; i++) {
+                                await checkAddressIsUnlocked(token2, participants[i]);
+                            }
+                        });
+                    });
+
+                    describe('cannot unlock', function () {
+                        before(async function () {
+                            token2 = await NYNJACoin.new(assigner, locker, { from: owner });
+                            await token2.tokenSaleStart({ from: owner });
+                            for (let i = 0; i < participants.length; i++) {
+                                await token2.mint(participants[i], 1, { from: assigner });
+                            }
+                            await token2.lockInBatches(participants, { from: locker });
+                        });
+
+                        it('only locker can unlock in batches', async function () {
+                            await assertRevert(token2.unlockInBatches(participants, { from: owner }));
+                        });
+
+                        it('cannot lock a batch of length 0', async function () {
+                            await assertRevert(token2.unlockInBatches([], { from: locker }));
+                        });
+
+                        after(async function () {
+                            for (let i = 0; i < participants.length; i++) {
+                                await checkAddressIsLocked(token2, participants[i]);
+                            }
+                        });
+                    });
+                });
             });
 
-            describe('locking/unlocking in batches', function () {
+            describe('transferring', function () {
+                it('sending tokens is not allowed for participants of the ongoing token sale', async function () {
+                    const unlockedTokensHolder = participants[0];
+                    await checkAddressIsUnlocked(token, unlockedTokensHolder);
+                    await token.assign(unlockedTokensHolder, 2, { from: assigner });
 
-                let token2;
-                let addresses = [];
+                    await assertRevert(token.transfer(someoneElse, 1, { from: unlockedTokensHolder }));
 
-                before(async function () {
+                    await token.approve(someoneElse, 1, { from: unlockedTokensHolder });
+                    await assertRevert(token.transferFrom(unlockedTokensHolder, someoneElse, 1, { from: someoneElse }));
 
-                    token2 = await NYNJACoin.new(assigner, locker, { from: owner });
-                    await token2.tokenSaleStart({ from: owner });
-
-                    const batchSize = 5;
-                    for (let i = 0; i < batchSize; i++) {
-                        let address = participants[i];
-                        addresses.push(address);
-                        token2.assign(address, 1, { from: assigner });
-                    }
-                });
-
-                it('cannot do that with a batch of length 0', async function () {
-                    await assertRevert(token2.lockInBatches([], { from: locker }));
-                    await assertRevert(token2.unlockInBatches([], { from: locker }));
-                });
-
-                it('do that in batches', async function () {
-                    await token2.lockInBatches(addresses, { from: locker });
-                    for (let i = 0; i < addresses.length; i++) {
-                        await checkAddressIsLocked(token2, addresses[i]);
-                    }
-
-                    await token2.unlockInBatches(addresses, { from: locker });
-                    for (let i = 0; i < addresses.length; i++) {
-                        await checkAddressIsUnlocked(token2, addresses[i]);
-                    }
+                    '0'.should.be.bignumber.equal(await token.balanceOf(someoneElse, { from: someoneElse }));
                 });
             });
         });
 
-        describe('transferring', function () {
-
-            it('sending/receiving tokens is not allowed for participants of an ongoing token sale', async function () {
-                await assertRevert(token.transfer(someoneElse, 1, { from: participants[4] }));
-
-                await token.approve(someoneElse, 1, { from: participants[4] });
-                await assertRevert(token.transferFrom(participants[4], someoneElse, 1, { from: someoneElse }));
-            });
-        });
-
-        describe('token sale end', function () {
-
+        describe('token sale ending', function () {
             it('accounts different from owner cannot end a token sale', async function () {
                 await assertRevert(token.tokenSaleEnd({ from: someoneElse }));
             });
 
             it('token sale end', async function () {
-                let tokenSaleEnd = await token.tokenSaleEnd({ from: owner });
-                await checkTokenSaleEnd(tokenSaleEnd, 1);
+                await checkTokenSaleEnd(await token.tokenSaleEnd({ from: owner }), 1);
             });
 
             it('cannot end a token sale which already ended', async function () {
@@ -437,21 +526,36 @@ contract('NYNJACoin tests', function (accounts) {
         });
 
         describe('after token sale and before the next token sale', function () {
+            describe('minting/assigning', function () {
+                it('cannot mint/assign tokens if a token sale is not ongoing', async function () {
+                    await assertRevert(token.assign(participants[0], 1, { from: assigner }));
+                    await assertRevert(token.mint(participants[0], 1, { from: assigner }));
+                });
+            });
 
             describe('locking', function () {
-
-                it('locked tokens cannot be transferred', async function () {
-                    await assertRevert(token.transfer(someoneElse, 2, { from: participants[1] }));
-
-                    await token.approve(someoneElse, 2, { from: participants[1] });
-                    await assertRevert(token.transferFrom(participants[1], someoneElse, 2, { from: someoneElse }));
+                before(async function () {
+                    // checking participant account states
+                    await checkAddressIsLocked(token, participants[1]);
+                    await checkAddressIsUnlocked(token, participants[0]);
+                    await checkAddressIsLocked(token, participants[2]);
+                    '1'.should.be.bignumber.lessThan(await token.balanceOf(participants[1], { from: someoneElse }));
                 });
 
-                it('unlocking some tokens after token sale', async function () {
+                it('locked address tokens cannot be transferred', async function () {
+                    const lockedTokensHolder = participants[1];
+
+                    await assertRevert(token.transfer(someoneElse, 1, { from: lockedTokensHolder }));
+
+                    await token.approve(someoneElse, 1, { from: lockedTokensHolder });
+                    await assertRevert(token.transferFrom(lockedTokensHolder, someoneElse, 1, { from: someoneElse }));
+
+                    '0'.should.be.bignumber.equal(await token.balanceOf(someoneElse, { from: someoneElse }));
+                });
+
+                it('unlock address', async function () {
                     let unlockAddress = await token.unlockAddress(participants[1], { from: locker });
                     await checkUnlockAddress(unlockAddress, token, participants[1]);
-                    let transfer = await token.transfer(participants[0], 1, { from: participants[1] });
-                    checkTransfer(transfer, participants[0], 1, participants[1]);
                 });
 
                 it('cannot lock tokens if a token sale is not ongoing', async function () {
@@ -460,106 +564,128 @@ contract('NYNJACoin tests', function (accounts) {
             });
 
             describe('transferring', function () {
-                it('transferring tokens is allowed if a token sale is not ongoing', async function () {
-                    let transfer = await token.transfer(participants[4], 1, { from: participants[3] });
-                    checkTransfer(transfer, participants[4], 1, participants[3]);
+                it('transferring from unlocked account', async function () {
+                    // current account statuses:
+                    // participants[0] is unlocked
+                    // participants[1] is unlocked
+                    // participants[2] is locked
+                    // participants[3] is unlocked
+
+                    await assertedTransferFrom(participants[0], 1, participants[1], someoneElse);
+                    await assertedTransferFrom(participants[0], 1, participants[3], participants[1]);
+                    await assertedTransfer(participants[0], 1, participants[1]);
+                });
+
+                it('locked addresses can receive tokens', async function () {
+                    await checkAddressIsLocked(token, participants[2]);
+                    await assertedTransferFrom(participants[2], 1, participants[3], participants[1]);
+                    await assertedTransfer(participants[2], 1, participants[1]);
                 });
             });
         });
 
-        describe('next token sale', function () {
+        describe('2nd token sale start', function () {
+            it('start token sale', async function () {
+                await checkTokenSaleStart(await token.tokenSaleStart({ from: owner }), 2);
+            });
+        });
 
-            // subsequent token sales              
+        describe('during 2nd token sale', function () {
+            describe('minting/assigning', function () {
+                it('minting/assigning of new addresses', async function () {
+                    await assertedMint(participants2[0], 100);
+                    await assertedMint(participants2[1], 101);
+                });
+                describe('participant addresses in a previous token sale cannot be minted/assigned tokens in the current sale', async function () {
+                    it('minting', async function () {
+                        await assertRevert(token.mint(participants[4], 1, { from: assigner }));
+                    });
 
-            it('start a 2nd token sale', async function () {
-                let tokenSaleStart2 = await token.tokenSaleStart({ from: owner });
-                await checkTokenSaleStart(tokenSaleStart2, 2);
+                    it('assigning', async function () {
+                        await assertRevert(token.assign(participants[5], 1, { from: assigner }));
+                    });
+                });
             });
 
-            // locked tokens bought in a previous token sale
+            describe('locking', function () {
+                it('locking of new addresses', async function () {
+                    await checkLockAddress(await token.lockAddress(participants2[0], { from: locker }), token, participants2[0]);
+                });
+                it('should not be able to lock tokens belonging to an address which participated in a previous token sale but not in the current token sake', async function () {
+                    await assertRevert(token.lockAddress(participants[4], { from: locker }));
+                });
+                it('unlocking some tokens of a previously ended token sale', async function () {
+                    let unlockAddress = await token.unlockAddress(participants[2], { from: locker });
+                    await checkUnlockAddress(unlockAddress, token, participants[2]);
 
-            it('cannot lock tokens of an address which participated in a previous token sale', async function () {
-                await assertRevert(token.lockAddress(participants[4], { from: locker }));
+                    await assertedTransfer(participants[0], 1, participants[2]);
+
+                    // current account statuses:
+                    // participants[0] is unlocked
+                    // participants[1] is unlocked
+                    // participants[2] is unlocked
+                    // participants[3] is unlocked
+                });
             });
 
-            it('unlocking some tokens of a previously ended token sale', async function () {
-                let unlockAddress = await token.unlockAddress(participants[2], { from: locker });
-                await checkUnlockAddress(unlockAddress, token, participants[2]);
-                let transfer = await token.transfer(participants[0], 1, { from: participants[2] });
-                checkTransfer(transfer, participants[0], 1, participants[2]);
-            });
+            describe('transferring', function () {
+                it('should not be able to send tokens from current token sale unlocked addresses', async function () {
+                    await assertRevert(token.transfer(someoneElse, 1, { from: participants2[1] }));
+                    await token.approve(someoneElse, 1, { from: participants2[1] });
+                    await assertRevert(token.transferFrom(participants2[1], someoneElse, 1, { from: someoneElse }));
+                });
 
-            // transferring tokens bought in a previous token sale
-
-            it('tokens bought in a previously ended token sale can be transferred during another ongoing token sale', async function () {
-                let transfer = await token.transfer(participants[4], 1, { from: participants[3] });
-                checkTransfer(transfer, participants[4], 1, participants[3]);
+                it('should be able to send tokens from previous token sale unlocked addresses', async function () {
+                    await assertedTransfer(participants[4], 1, participants[3]);
+                    await assertedTransferFrom(participants[0], 1, participants[1], participants[2]);
+                });
             });
         });
     });
 
-    describe('token supply limit', function () {
-
-        const maxTokensTest = maxTokenSupply;
-
-        beforeEach(async function () {
+    describe('max token supply limit', function () {
+        before(async function () {
             token = await NYNJACoin.new(assigner, locker, { from: owner });
+            await token.tokenSaleStart({ from: owner });
         });
 
-        it('value of max token supply constant in smart contract', async function () {
-            const maxTokensSmartContract = new BigNumber((await token.MAX_TOKEN_SUPPLY.call({ from: someoneElse })).toString());
-            assert.equal(maxTokensSmartContract.equals(maxTokensTest), true,
-                `MAX_TOKEN_SUPPLY = ${maxTokensSmartContract}, it should be = ${maxTokensTest}`);
+        it('token supply can be equal to max token supply constant', async function () {
+            token.assign(participants[0], maxTokenMinUnitSupply, { from: assigner });
+            maxTokenMinUnitSupply.should.be.bignumber.equal(await token.totalSupply({ from: someoneElse }));
         });
 
-        it('initial supply should be 0', async function () {
-            let totalSupply;
-            totalSupply = new BigNumber((await token.totalSupply.call({ from: someoneElse })).toString());
-            assert.equal(totalSupply.equals(new BigNumber(0)), true,
-                `totalSupply = ${totalSupply}, it should be = 0`);
+        it('token supply cannot be greater than max token supply constant', async function () {
+            await assertRevert(token.assign(participants[0], maxTokenMinUnitSupply.plus(1), { from: assigner }));
+            await assertRevert(token.mint(participants[0], 1, { from: assigner }));
+            maxTokenMinUnitSupply.should.be.bignumber.equal(await token.totalSupply({ from: someoneElse }));
         });
 
-        describe('max token supply', function () {
-            let token2;
+        describe('minting/assigning in batches gets fully reverted if token supply > max token supply constant during the batch transaction', function () {
+            const maxTokensMinus1 = maxTokenMinUnitSupply.minus(1);
+            const ethAddresses = [participants[1], participants[2]];
+            const numTokens = [1, 1];
 
             before(async function () {
-                token2 = await NYNJACoin.new(assigner, locker, { from: owner });
-                await token2.tokenSaleStart({ from: owner });
+                await token.assign(participants[0], maxTokensMinus1, { from: assigner });
+                maxTokensMinus1.should.be.bignumber.equal(await token.totalSupply({ from: someoneElse }));
             });
 
-            it('token supply can be equal to max token supply constant', async function () {
-                token2.assign(participants[0], maxTokensTest, { from: assigner });
-                const totalSupply = await token2.totalSupply({ from: someoneElse });
-                assert.equal(new BigNumber(totalSupply).toFixed(), maxTokensTest.toFixed());
+            it('minting', async function () {
+                await assertRevert(token.mintInBatches(ethAddresses, numTokens, { from: assigner }));
+
+                maxTokensMinus1.should.be.bignumber.equal(await token.totalSupply({ from: someoneElse }));
+                maxTokensMinus1.should.be.bignumber.equal(await token.balanceOf(participants[0], { from: someoneElse }));
+                '0'.should.be.bignumber.equal(await token.balanceOf(participants[1], { from: someoneElse }));
+                '0'.should.be.bignumber.equal(await token.balanceOf(participants[2], { from: someoneElse }));
             });
 
-            it('token supply cannot be greater than max token supply constant', async function () {
-                await assertRevert(token2.assign(participants[0], maxTokensTest.plus(1), { from: assigner }));
-                await assertRevert(token2.mint(participants[0], 1, { from: assigner }));
-                const totalSupply = await token2.totalSupply({ from: someoneElse });
-                assert.equal(new BigNumber(totalSupply).toFixed(), maxTokensTest.toFixed());
-            });
+            it('assigning', async function () {
+                await assertRevert(token.assignInBatches(ethAddresses, numTokens, { from: assigner }));
 
-            it('assignment in batches gets fully reverted if token supply > max token supply constant at any time during the batch', async function () {
-                const maxTokensMinus1 = maxTokensTest.minus(1);
-                token2.assign(participants[0], maxTokensMinus1, { from: assigner });
-                let totalSupply = await token2.totalSupply({ from: someoneElse });
-                assert.equal(new BigNumber(totalSupply).toFixed(), maxTokensMinus1.toFixed());
-
-                const ethAddresses = [participants[1], participants[2]];
-                const numTokens = [1, 1];
-                await assertRevert(token2.assignInBatches(ethAddresses, numTokens, { from: assigner }));
-
-                totalSupply = new BigNumber(await token2.totalSupply({ from: someoneElse }));
-                assert.equal(new BigNumber(totalSupply).toFixed(), maxTokensMinus1.toFixed());
-
-                const balancePart0 = new BigNumber((await token2.balanceOf(participants[0], { from: someoneElse })));
-                const balancePart1 = new BigNumber((await token2.balanceOf(participants[1], { from: someoneElse })));
-                const balancePart2 = new BigNumber((await token2.balanceOf(participants[2], { from: someoneElse })));
-
-                assert.equal(balancePart0.toFixed(), maxTokensMinus1.toFixed());
-                assert.equal(balancePart1.toFixed(), "0");
-                assert.equal(balancePart2.toFixed(), "0");
+                maxTokensMinus1.should.be.bignumber.equal(await token.totalSupply({ from: someoneElse }));
+                maxTokensMinus1.should.be.bignumber.equal(await token.balanceOf(participants[0], { from: someoneElse }));
+                '0'.should.be.bignumber.equal(await token.balanceOf(participants[1], { from: someoneElse }));
+                '0'.should.be.bignumber.equal(await token.balanceOf(participants[2], { from: someoneElse }));
             });
         });
     });

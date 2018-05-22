@@ -1,8 +1,11 @@
+/// @title  ExchangeRate.test.js
+/// @author Jose Perez - <jose.perez@diginex.com>
+/// @notice VestingTrustee smart contract unit test
+
 'use strict';
 
-const BigNumber = require('bignumber.js');
+const BigNumber = web3.BigNumber;
 const assertRevert = require('./helpers/assertRevert');
-
 const ExchangeRate = artifacts.require('../contracts/ExchangeRate.sol');
 
 const trimHex = (x) => x.replace(/^0x0+/, '0x');

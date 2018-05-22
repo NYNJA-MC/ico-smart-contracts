@@ -1,0 +1,14 @@
+version: "3"
+
+services:
+  truffle:
+    image: nynjacoin/truffle
+    build:
+      context: .
+    volumes:
+      - ./truffle:/code/truffle
+      - ./coverage:/code/coverage
+      - ./scripts:/code/scripts
+      - ./.babelrc:/code/.babelrc
+      - ./.git:/code/.git
+

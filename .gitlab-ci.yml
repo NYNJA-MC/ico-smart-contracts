@@ -1,0 +1,40 @@
+image: docker
+
+services:
+  - docker:dind
+
+variables:
+  DOCKER_DRIVER: overlay2
+  GIT_SUBMODULE_STRATEGY: recursive
+
+stages:
+  - build
+  - test
+
+before_script:
+  - docker login -u gitlab-ci-token -p $CI_JOB_TOKEN $CI_REGISTRY
+
+after_script:
+  - command -v docker-compose && docker-compose -p gitlab-$CI_JOB_ID down -vt 0 --remove-orphans
+
+build:
+  stage: build
+  script:
+    - docker pull $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG || true
+    - cd $CI_PROJECT_DIR
+    - docker build . -t $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG --cache-from $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG --cache-from $CI_REGISTRY_IMAGE
+    - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
+
+test_unit:
+  stage: test
+  script:
+    # BEGIN test-setup
+    - apk add --no-cache py-pip nodejs
+    - pip install docker-compose
+    - docker pull $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
+    - cd $CI_PROJECT_DIR
+    - export COMPOSE_PROJECT_NAME=gitlab-$CI_JOB_ID
+    # END test-setup
+
+    - sleep 60
+    - npm test

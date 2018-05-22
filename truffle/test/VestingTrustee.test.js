@@ -6,6 +6,9 @@ const constants = require('./helpers/constants');
 const NYNJACoin = artifacts.require('../contracts/NYNJACoin.sol');
 const VestingTrustee = artifacts.require('../contracts/VestingTrustee.sol');
 
+/// @title  VestingTrustee.test.js
+/// @author Jose Perez - <jose.perez@diginex.com>
+/// @notice VestingTrustee smart contract unit test
 contract('VestingTrustee', (accounts) => {
 
     let now;

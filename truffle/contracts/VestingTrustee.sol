@@ -4,7 +4,10 @@ import '../../node_modules/openzeppelin-solidity/contracts/math/SafeMath.sol';
 import '../../node_modules/openzeppelin-solidity/contracts/ownership/Ownable.sol';
 import './NYNJACoin.sol';
 
-/// @title Vesting trustee contract for NYNJA token.
+/// @title  VestingTrustee
+/// @author Jose Perez - <jose.perez@diginex.com>
+/// @notice Vesting trustee contract for NYNJACoin ERC20 tokens. Tokens are granted to specific
+///         addresses and vested under certain criteria (vesting period, cliff period, etc.)
 contract VestingTrustee is Ownable {
     using SafeMath for uint256;
 
@@ -14,7 +17,7 @@ contract VestingTrustee is Ownable {
     // The address allowed to grant and revoke tokens.
     address public vester;
 
-    // Vesting grant for a speicifc holder.
+    // Vesting grant for a specific holder.
     struct Grant {
         uint256 value;
         uint256 start;
@@ -54,13 +57,13 @@ contract VestingTrustee is Ownable {
     }
 
     // @dev Allows the owner to change the vester.
-    // @param newVester The address of the new vester.
+    // @param _newVester The address of the new vester.
     // @return True if the operation was successful.   
-    function transferVester(address newVester) external onlyOwner returns(bool) {
-        require(newVester != address(0));
+    function transferVester(address _newVester) external onlyOwner returns(bool) {
+        require(_newVester != address(0));
 
-        emit VesterTransferred(vester, newVester);
-        vester = newVester;
+        emit VesterTransferred(vester, _newVester);
+        vester = _newVester;
         return true;
     }
     

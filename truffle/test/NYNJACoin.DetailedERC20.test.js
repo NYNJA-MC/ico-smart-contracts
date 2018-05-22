@@ -1,6 +1,6 @@
 "use strict";
 
-// @notice Tests the functionality inherited by NYNJACoin from openzeppelin-solidity v1.9.0 DetailedERC20 implementation
+// @notice Tests the functionality inherited by NYNJACoin from openzeppelin-solidity DetailedERC20 implementation
 
 const BigNumber = web3.BigNumber;
 
