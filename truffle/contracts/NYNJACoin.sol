@@ -10,11 +10,10 @@ import "../../node_modules/openzeppelin-solidity/contracts/token/ERC20/StandardT
 contract NYNJACoin is StandardToken, Ownable {
 
     using SafeMath for uint256;
-    using SafeMath for uint8;
 
     string public constant name = "NYNJACoin";
     string public constant symbol = "NYN";
-    uint8 public constant decimals = 18;
+    uint256 public constant decimals = 18;
 
     // Using same number of decimal figures as ETH (i.e. 18).
     uint256 public constant TOKEN_UNIT = 10 ** uint256(decimals);
@@ -27,8 +26,8 @@ contract NYNJACoin is StandardToken, Ownable {
 
     mapping(address => bool) public locked;        // If true, address' tokens cannot be transferred.
 
-    uint8 public currentTokenSaleId = 0;           // The id of the current token sale.
-    mapping(address => uint8) public tokenSaleId;  // In which token sale the address first participated.
+    uint256 public currentTokenSaleId = 0;           // The id of the current token sale.
+    mapping(address => uint256) public tokenSaleId;  // In which token sale the address participated.
 
     bool public tokenSaleOngoing = false;
 
@@ -101,12 +100,12 @@ contract NYNJACoin is StandardToken, Ownable {
     }
 
     /// @return Returns current token sale id.
-    function getCurrentTokenSaleId() external view returns(uint8) {
+    function getCurrentTokenSaleId() external view returns(uint256) {
         return currentTokenSaleId;
     }
 
-    /// @return Returns the id of the last token sale that the address participated in.
-    function getAddressTokenSaleId(address _address) external view returns(uint8) {
+    /// @return Returns the id of the token sale the address participated in.
+    function getAddressTokenSaleId(address _address) external view returns(uint256) {
         return tokenSaleId[_address];
     }
 
