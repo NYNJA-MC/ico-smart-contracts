@@ -564,14 +564,18 @@ contract('NYNJACoin tests', function (accounts) {
             });
 
             describe('transferring', function () {
-                it('transferring from unlocked account', async function () {
-                    // current account statuses:
-                    // participants[0] is unlocked
-                    // participants[1] is unlocked
-                    // participants[2] is locked
-                    // participants[3] is unlocked
+                // current account statuses:
+                // participants[0] is unlocked
+                // participants[1] is unlocked
+                // participants[2] is locked
+                // participants[3] is unlocked
 
+                it('`transferFrom` with an account which did not participate in the token sale', async function () {
+                    assert.equal(0, await token.getAddressTokenSaleId(someoneElse, { from: someoneElse }));
                     await assertedTransferFrom(participants[0], 1, participants[1], someoneElse);
+                });
+
+                it('transferring from unlocked account', async function () {
                     await assertedTransferFrom(participants[0], 1, participants[3], participants[1]);
                     await assertedTransfer(participants[0], 1, participants[1]);
                 });
