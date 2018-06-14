@@ -14,7 +14,9 @@ import expectEvent from './helpers/expectEvent';
 const NYNJACoin = artifacts.require('../contracts/NYNJACoin.sol');
 
 contract('NYNJACoin tests', function (accounts) {
-    const NYNJA_TOKENS_SUPPLY = 5000000000; // 5 billion tokens
+    const NYNJA_TOKENS_SUPPLY = new BigNumber(10).pow(9).times(3); // 3 billion tokens
+    const NYNJA_MAX_TOKEN_SALES = 2;
+    const NYNJA_MAX_BATCH_SIZE = 400;
 
     const owner = accounts[1];
     const assigner = accounts[2];
@@ -141,7 +143,6 @@ contract('NYNJACoin tests', function (accounts) {
         const expectedTotalSupply = await token.totalSupply({ from: someoneElse });
 
         const approve = await token.approve(approved, amount, { from: from });
-        // TODO: check approve
         const transfer = await token.transferFrom(from, to, amount, { from: approved });
         await checkTransfer(transfer, to, amount, from);
 
@@ -306,6 +307,18 @@ contract('NYNJACoin tests', function (accounts) {
         });
 
         describe('during token sale', function () {
+            let largeBatchParticipants = [];
+            let largeBatchAmounts = [];
+            let maxBatchSize;
+
+            before(async function () {
+                maxBatchSize = (await token.MAX_BATCH_SIZE.call({ from: someoneElse })).toNumber();
+                for (let i = 0; i <= maxBatchSize; i++) {
+                    largeBatchParticipants.push(participants[0]);
+                    largeBatchAmounts.push(new BigNumber(1));
+                }
+            });
+
             describe('minting/assigning', function () {
                 it('accounts different from assigner cannot assign or mint tokens', async function () {
                     await assertRevert(token.assign(participants[0], 1, { from: owner }));
@@ -369,6 +382,16 @@ contract('NYNJACoin tests', function (accounts) {
                         totalSupplyBefore.should.be.bignumber.equal(await token.totalSupply({ from: someoneElse }));
                     });
 
+                    it('check value of max batch size constant in smart contract', async function () {
+                        NYNJA_MAX_BATCH_SIZE.should.be.bignumber.equal(await token.MAX_BATCH_SIZE.call({ from: someoneElse }));
+                    });
+
+                    it('cannot mint/assign batches larger than the maximum allowed', async function () {
+                        await assertRevert(token.mintInBatches(largeBatchParticipants, largeBatchAmounts, { from: assigner }));
+                        await assertRevert(token.assignInBatches(largeBatchParticipants, largeBatchAmounts, { from: assigner }));
+                        totalSupplyBefore.should.be.bignumber.equal(await token.totalSupply({ from: someoneElse }));
+                    });
+
                     it('mint some tokens in batches', async function () {
                         await token.mintInBatches(participants, amounts, { from: assigner });
                         totalSupplyBefore.plus(sumAmounts).should.be.bignumber.equal(await token.totalSupply({ from: someoneElse }));
@@ -382,7 +405,6 @@ contract('NYNJACoin tests', function (accounts) {
             });
 
             describe('locking', function () {
-
                 it('accounts different from locker cannot lock tokens', async function () {
                     await assertRevert(token.lockAddress(participants[0], { from: owner }));
                     await checkAddressIsUnlocked(token, participants[0]);
@@ -461,6 +483,10 @@ contract('NYNJACoin tests', function (accounts) {
                             await assertRevert(token2.lockInBatches([], { from: locker }));
                         });
 
+                        it('cannot lock in batches larger than the maximum allowed', async function () {
+                            await assertRevert(token2.lockInBatches(largeBatchParticipants, { from: locker }));
+                        });
+
                         after(async function () {
                             for (let i = 0; i < participants.length; i++) {
                                 await checkAddressIsUnlocked(token2, participants[i]);
@@ -484,6 +510,10 @@ contract('NYNJACoin tests', function (accounts) {
 
                         it('cannot lock a batch of length 0', async function () {
                             await assertRevert(token2.unlockInBatches([], { from: locker }));
+                        });
+
+                        it('cannot unlock in batches larger than the maximum allowed', async function () {
+                            await assertRevert(token2.unlockInBatches(largeBatchParticipants, { from: locker }));
                         });
 
                         after(async function () {
@@ -596,18 +626,16 @@ contract('NYNJACoin tests', function (accounts) {
 
         describe('during 2nd token sale', function () {
             describe('minting/assigning', function () {
-                it('minting/assigning of new addresses', async function () {
+                it('minting of new addresses', async function () {
                     await assertedMint(participants2[0], 100);
                     await assertedMint(participants2[1], 101);
                 });
-                describe('participant addresses in a previous token sale cannot be minted/assigned tokens in the current sale', async function () {
-                    it('minting', async function () {
-                        await assertRevert(token.mint(participants[4], 1, { from: assigner }));
-                    });
-
-                    it('assigning', async function () {
-                        await assertRevert(token.assign(participants[5], 1, { from: assigner }));
-                    });
+                it('can only assign in the 1st token sale', async function () {
+                    await assertRevert(token.assign(participants2[0], 1, { from: assigner }));
+                });
+                it('participant addresses in a previous token sale cannot be minted/assigned tokens in the current sale', async function () {
+                    await assertRevert(token.mint(participants[4], 1, { from: assigner }));
+                    await assertRevert(token.assign(participants[5], 1, { from: assigner }));
                 });
             });
 
@@ -642,6 +670,28 @@ contract('NYNJACoin tests', function (accounts) {
                 it('should be able to send tokens from previous token sale unlocked addresses', async function () {
                     await assertedTransfer(participants[4], 1, participants[3]);
                     await assertedTransferFrom(participants[0], 1, participants[1], participants[2]);
+                });
+            });
+        });
+
+        describe('can only have a limited amount of token sales', function () {
+            describe('check max number of token sales', function () {
+                it('check value of max number of token sales constant in smart contract', async function () {
+                    NYNJA_MAX_TOKEN_SALES.should.be.bignumber.equal(await token.MAX_TOKEN_SALES.call({ from: someoneElse }));
+                });
+
+                it('cannot perform more token sales than the max number of token sales constant', async function () {
+                    const maxTokenSales = new BigNumber(await token.MAX_TOKEN_SALES.call({ from: someoneElse }));
+                    await token.tokenSaleEnd({ from: owner });
+                    let currentTokenSaleId = new BigNumber(await token.getCurrentTokenSaleId({ from: someoneElse }));
+
+                    while (currentTokenSaleId.lt(maxTokenSales)) {
+                        await token.tokenSaleStart({ from: owner });
+                        await token.tokenSaleEnd({ from: owner });
+                        currentTokenSaleId = new BigNumber(await token.getCurrentTokenSaleId({ from: someoneElse }));
+                    }
+
+                    await assertRevert(token.tokenSaleStart({ from: owner }));
                 });
             });
         });

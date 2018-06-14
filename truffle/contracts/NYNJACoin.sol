@@ -7,8 +7,10 @@ import "../../node_modules/openzeppelin-solidity/contracts/token/ERC20/StandardT
 /// @title   NYNJACoin
 /// @author  Jose Perez - <jose.perez@diginex.com>
 /// @notice  ERC20 token for NYNJA Mobile Communicator token sale.
+/// @dev     The contract allows to perform a number of token sales in different periods in time.
+///          allowing participants in previous token sales to transfer tokens to other accounts.
+///          Additionally, token locking logic for KYC/AML compliance checking is supported.
 contract NYNJACoin is StandardToken, Ownable {
-
     using SafeMath for uint256;
 
     string public constant name = "NYNJACoin";
@@ -18,8 +20,14 @@ contract NYNJACoin is StandardToken, Ownable {
     // Using same number of decimal figures as ETH (i.e. 18).
     uint256 public constant TOKEN_UNIT = 10 ** uint256(decimals);
 
-    // Maximum number of tokens in circulation: 5 billion.
-    uint256 public constant MAX_TOKEN_SUPPLY = (5 * 10 ** 9) * TOKEN_UNIT;
+    // Maximum number of tokens in circulation: 3 billion.
+    uint256 public constant MAX_TOKEN_SUPPLY = (3 * 10 ** 9) * TOKEN_UNIT;
+
+    // Maximum number of tokens sales to be performed.
+    uint256 public constant MAX_TOKEN_SALES = 2;
+
+    // Maximum size of the batch functions input arrays.
+    uint256 public constant MAX_BATCH_SIZE = 400;
 
     address public assigner;    // The address allowed to assign or mint tokens during token sale.
     address public locker;      // The address allowed to lock/unlock addresses.
@@ -40,6 +48,16 @@ contract NYNJACoin is StandardToken, Ownable {
     event LockerTransferred(address indexed previousLocker, address indexed newLocker);
     event AssignerTransferred(address indexed previousAssigner, address indexed newAssigner);
 
+    /// @dev Constructor that initializes the NYNJACoin contract.
+    /// @param _assigner The assigner account.
+    /// @param _locker The locker account.
+    constructor(address _assigner, address _locker) public {
+        require(_assigner != address(0));
+        require(_locker != address(0));
+
+        assigner = _assigner;
+        locker = _locker;
+    }
 
     /// @dev True if a token sale is ongoing.
     modifier tokenSaleIsOngoing() {
@@ -65,21 +83,12 @@ contract NYNJACoin is StandardToken, Ownable {
         _;
     }
 
-    /// @dev Constructor that initializes the NYNJACoin contract.
-    /// @param _assigner The assigner account.
-    /// @param _locker The locker account.
-    constructor(address _assigner, address _locker) public {
-        require(_assigner != address(0));
-        require(_locker != address(0));
-
-        assigner = _assigner;
-        locker = _locker;
-    }
-
     /// @dev Starts a new token sale. Only the owner can start a new token sale. If a token sale
     ///      is ongoing, it has to be ended before a new token sale can be started.
+    ///      No more than `MAX_TOKEN_SALES` sales can be carried out.
     /// @return True if the operation was successful.
     function tokenSaleStart() external onlyOwner tokenSaleIsNotOngoing returns(bool) {
+        require(currentTokenSaleId < MAX_TOKEN_SALES);
         currentTokenSaleId++;
         tokenSaleOngoing = true;
         emit TokenSaleStarting(currentTokenSaleId);
@@ -94,16 +103,20 @@ contract NYNJACoin is StandardToken, Ownable {
         return true;
     }
 
-    /// @return Returns whether or not a token sale is ongoing.
+    /// @dev Returns whether or not a token sale is ongoing.
+    /// @return True if a token sale is ongoing.
     function isTokenSaleOngoing() external view returns(bool) {
         return tokenSaleOngoing;
     }
 
-    /// @return Returns current token sale id.
+    /// @dev Getter of the variable `currentTokenSaleId`.
+    /// @return Returns the current token sale id.
     function getCurrentTokenSaleId() external view returns(uint256) {
         return currentTokenSaleId;
     }
 
+    /// @dev Getter of the variable `tokenSaleId[]`.
+    /// @param _address The address of the participant.
     /// @return Returns the id of the token sale the address participated in.
     function getAddressTokenSaleId(address _address) external view returns(uint256) {
         return tokenSaleId[_address];
@@ -128,12 +141,12 @@ contract NYNJACoin is StandardToken, Ownable {
         totalSupply_ = totalSupply_.add(_amount);
         require(totalSupply_ <= MAX_TOKEN_SUPPLY);
 
-        balances[_to] = balances[_to].add(_amount);
-
         if (tokenSaleId[_to] == 0) {
             tokenSaleId[_to] = currentTokenSaleId;
         }
         require(tokenSaleId[_to] == currentTokenSaleId);
+
+        balances[_to] = balances[_to].add(_amount);
 
         emit Mint(_to, _amount);
         emit Transfer(address(0), _to, _amount);
@@ -147,6 +160,7 @@ contract NYNJACoin is StandardToken, Ownable {
     function mintInBatches(address[] _to, uint256[] _amount) external onlyAssigner tokenSaleIsOngoing returns(bool) {
         require(_to.length > 0);
         require(_to.length == _amount.length);
+        require(_to.length <= MAX_BATCH_SIZE);
 
         for (uint i = 0; i < _to.length; i++) {
             mint(_to[i], _amount[i]);
@@ -154,27 +168,33 @@ contract NYNJACoin is StandardToken, Ownable {
         return true;
     }
 
-    /// @dev Function to assign tokens
+    /// @dev Function to assign any number of tokens to a given address.
+    ///      Compared to the `mint` function, the `assign` function allows not just to increase but also to decrease
+    ///      the number of tokens of an address by assigning a lower value than the address current balance.
+    ///      This function can only be executed during initial token sale.
     /// @param _to The address that will receive the assigned tokens.
     /// @param _amount The amount of tokens to assign.
     /// @return True if the operation was successful.
     function assign(address _to, uint256 _amount) public onlyAssigner tokenSaleIsOngoing returns(bool) {
+        require(currentTokenSaleId == 1);
+
+        // The desired value to assign (`_amount`) can be either higher or lower than the current number of tokens
+        // of the address (`balances[_to]`). To calculate the new `totalSupply_` value, the difference between `_amount`
+        // and `balances[_to]` (`delta`) is calculated first, and then added or substracted to `totalSupply_` accordingly.
         uint256 delta = 0;
         if (balances[_to] < _amount) {
+            // balances[_to] will be increased, so totalSupply_ should be increased
             delta = _amount.sub(balances[_to]);
             totalSupply_ = totalSupply_.add(delta);
         } else {
+            // balances[_to] will be decreased, so totalSupply_ should be decreased
             delta = balances[_to].sub(_amount);
             totalSupply_ = totalSupply_.sub(delta);
         }
         require(totalSupply_ <= MAX_TOKEN_SUPPLY);
 
         balances[_to] = _amount;
-
-        if (tokenSaleId[_to] == 0) {
-            tokenSaleId[_to] = currentTokenSaleId;
-        }
-        require(tokenSaleId[_to] == currentTokenSaleId);
+        tokenSaleId[_to] = currentTokenSaleId;
 
         emit Assign(_to, _amount);
         emit Transfer(address(0), _to, _amount);
@@ -188,6 +208,7 @@ contract NYNJACoin is StandardToken, Ownable {
     function assignInBatches(address[] _to, uint256[] _amount) external onlyAssigner tokenSaleIsOngoing returns(bool) {
         require(_to.length > 0);
         require(_to.length == _amount.length);
+        require(_to.length <= MAX_BATCH_SIZE);
 
         for (uint i = 0; i < _to.length; i++) {
             assign(_to[i], _amount[i]);
@@ -195,9 +216,9 @@ contract NYNJACoin is StandardToken, Ownable {
         return true;
     }
 
-    // @dev Allows the current owner to change the locker.
-    // @param _newLocker The address of the new locker.
-    // @return True if the operation was successful.
+    /// @dev Allows the current owner to change the locker.
+    /// @param _newLocker The address of the new locker.
+    /// @return True if the operation was successful.
     function transferLocker(address _newLocker) external onlyOwner returns(bool) {
         require(_newLocker != address(0));
 
@@ -226,6 +247,7 @@ contract NYNJACoin is StandardToken, Ownable {
     /// @return True if the operation was successful.
     function unlockAddress(address _address) public onlyLocker returns(bool) {
         require(locked[_address]);
+
         locked[_address] = false;
         emit Unlock(_address);
         return true;
@@ -236,6 +258,8 @@ contract NYNJACoin is StandardToken, Ownable {
     /// @return True if the operation was successful.
     function lockInBatches(address[] _addresses) external onlyLocker returns(bool) {
         require(_addresses.length > 0);
+        require(_addresses.length <= MAX_BATCH_SIZE);
+
         for (uint i = 0; i < _addresses.length; i++) {
             lockAddress(_addresses[i]);
         }
@@ -247,6 +271,8 @@ contract NYNJACoin is StandardToken, Ownable {
     /// @return True if the operation was successful.
     function unlockInBatches(address[] _addresses) external onlyLocker returns(bool) {
         require(_addresses.length > 0);
+        require(_addresses.length <= MAX_BATCH_SIZE);
+
         for (uint i = 0; i < _addresses.length; i++) {
             unlockAddress(_addresses[i]);
         }
@@ -267,10 +293,12 @@ contract NYNJACoin is StandardToken, Ownable {
     /// @param _value The number of tokens to be transferred.
     function transfer(address _to, uint256 _value) public returns(bool) {
         require(!locked[msg.sender]);
+
         if (tokenSaleOngoing) {
             require(tokenSaleId[msg.sender] < currentTokenSaleId);
             require(tokenSaleId[_to] < currentTokenSaleId);
         }
+
         return super.transfer(_to, _value);
     }
 
@@ -284,11 +312,13 @@ contract NYNJACoin is StandardToken, Ownable {
     function transferFrom(address _from, address _to, uint256 _value) public returns(bool) {
         require(!locked[msg.sender]);
         require(!locked[_from]);
+
         if (tokenSaleOngoing) {
             require(tokenSaleId[msg.sender] < currentTokenSaleId);
             require(tokenSaleId[_from] < currentTokenSaleId);
             require(tokenSaleId[_to] < currentTokenSaleId);
         }
+
         return super.transferFrom(_from, _to, _value);
     }
 }
