@@ -291,6 +291,21 @@ contract('VestingTrustee', (accounts) => {
                     await trustee.revoke(grantee, { from: vester });
                     assert.equal((await trustee.totalVesting({ from: someoneElse })).toNumber(), 0);
                 });
+
+                it('grant should be deleted after revoking', async () => {
+                    let grantee = grantees[1];
+
+                    await trustee.grant(grantee, balance, now, now + constants.MONTH, now + constants.YEAR, 1 * constants.DAY, true, { from: vester });
+                    assert.equal((await trustee.totalVesting({ from: someoneElse })).toNumber(), balance);
+
+                    const vestingGrantBefore = await getGrant(grantee);
+                    assert.equal(vestingGrantBefore.value, balance);
+
+                    await trustee.revoke(grantee, { from: vester });
+
+                    const vestingGrantAfter = await getGrant(grantee);
+                    assert.equal(vestingGrantAfter.value, 0);
+                });
             });
 
             [
@@ -421,10 +436,19 @@ contract('VestingTrustee', (accounts) => {
 
                                     // Jump forward in time by the requested diff.
                                     await time.increaseTime(res.diff);
-                                    await trustee.unlockVestedTokens(holder, { from: someoneElse });
 
-                                    totalUnlocked += res.unlocked;
+                                    const vestingGrant = await getGrant(holder);
+                                    const tokensLeft = vestingGrant.value - vestingGrant.transferred;
+                                    if (tokensLeft === 0) {
+                                        // All granted tokens were already transferred. No tokens to be unlocked left
+                                        assert.equal(res.unlocked, 0);
+                                        await assertRevert(trustee.unlockVestedTokens(holder, { from: someoneElse }));
+                                    } else {
+                                        await trustee.unlockVestedTokens(holder, { from: someoneElse });
+                                        totalUnlocked += res.unlocked;
+                                    }
                                 }
+
                                 // Verify the state after the multiple unlocks.
                                 let totalVesting2 = (await trustee.totalVesting({ from: someoneElse })).toNumber();
                                 let trusteeBalance2 = (await token.balanceOf(trustee.address, { from: someoneElse })).toNumber();
@@ -474,6 +498,104 @@ contract('VestingTrustee', (accounts) => {
                         }
                     });
             });
+        });
+    });
+
+    describe('revoke (no prior vested tokens unlocking)', async () => {
+
+        [
+            {
+                tokens: 1000, startOffset: 0, cliffOffset: constants.MONTH, endOffset: constants.YEAR, installmentLength: 1, results: [
+                    { diff: 0, userBalance: 0, vesterBalance: 1000 },
+                    // 1 day before the cliff.
+                    { diff: constants.MONTH - constants.DAY, userBalance: 0, vesterBalance: 1000 },
+                    // At the cliff.
+                    { diff: constants.DAY, userBalance: 83, vesterBalance: 917 },
+                    // 1 second after che cliff and previous unlock/withdraw.
+                    { diff: 1, userBalance: 83, vesterBalance: 917 },
+                    // 1 month after the cliff.
+                    { diff: constants.MONTH - 1, userBalance: 166, vesterBalance: 834 },
+                    // At half of the vesting period.
+                    { diff: 4 * constants.MONTH, userBalance: 500, vesterBalance: 500 },
+                    // At the end of the vesting period.
+                    { diff: 6 * constants.MONTH, userBalance: 1000, vesterBalance: 0 },
+                    // After the vesting period, with everything already unlocked and withdrawn.
+                    { diff: constants.DAY, userBalance: 1000, vesterBalance: 0 }
+                ]
+            },
+            {
+                tokens: 1000, startOffset: 0, cliffOffset: 0, endOffset: constants.YEAR, installmentLength: 3 * constants.MONTH, results: [
+                    { diff: 0, userBalance: 0, vesterBalance: 1000 },
+                    // 1 day after the start of the vesting.
+                    { diff: constants.DAY, userBalance: 0, vesterBalance: 1000 },
+                    // 1 month after the start of the vesting.
+                    { diff: constants.MONTH - constants.DAY, userBalance: 0, vesterBalance: 1000 },
+                    // 2 months after the start of the vesting.
+                    { diff: constants.MONTH, userBalance: 0, vesterBalance: 1000 },
+                    // 3 months after the start of the vesting.
+                    { diff: constants.MONTH, userBalance: 250, vesterBalance: 750 },
+                    { diff: constants.MONTH, userBalance: 250, vesterBalance: 750 },
+                    // Another installment.
+                    { diff: 2 * constants.MONTH, userBalance: 500, vesterBalance: 500 },
+                    // After the vesting period.
+                    { diff: constants.YEAR, userBalance: 1000, vesterBalance: 0 }
+                ]
+            },
+            {
+                tokens: 1000, startOffset: constants.MONTH, cliffOffset: 2 * constants.MONTH, endOffset: 2 * constants.MONTH, installmentLength: constants.MONTH, results: [
+                    { diff: 0, userBalance: 0, vesterBalance: 1000 },
+                    // At start of the vesting.
+                    { diff: constants.MONTH, userBalance: 0, vesterBalance: 1000 },
+                    // At first and last installment, also at vesting end.
+                    { diff: constants.MONTH, userBalance: 1000, vesterBalance: 0 }
+                ]
+            }
+        ].forEach(async (grant) => {
+            context(`grant: ${grant.tokens}, startOffset: ${grant.startOffset}, cliffOffset: ${grant.cliffOffset}, ` +
+                `endOffset: ${grant.endOffset}, installmentLength: ${grant.installmentLength}`, async () => {
+
+                    for (let i = 0; i < grant.results.length; ++i) {
+                        it(`should revoke the grant and automatically refund vester and grantee (scenario ${i + 1})`, async () => {
+                            trustee = await VestingTrustee.new(token.address, vester, { from: vester });
+                            await token.mint(trustee.address, grant.tokens, { from: assigner });
+                            await token.tokenSaleEnd({ from: owner });
+                            await trustee.grant(holder, grant.tokens, now + grant.startOffset, now + grant.cliffOffset,
+                                now + grant.endOffset, grant.installmentLength, true, { from: vester });
+
+                            // Get state before revoke.
+                            let totalVesting = (await trustee.totalVesting({ from: someoneElse })).toNumber();
+                            let trusteeBalance = (await token.balanceOf(trustee.address, { from: someoneElse })).toNumber();
+                            let userBalance = (await token.balanceOf(holder, { from: someoneElse })).toNumber();
+                            let vesterBalance = (await token.balanceOf(vester)).toNumber();
+
+                            assert.equal(totalVesting, grant.tokens, `totalVesting = ${totalVesting}, expecting ${grant.tokens}`);
+                            assert.equal(trusteeBalance, grant.tokens, `trusteeBalance = ${trusteeBalance}, expecting ${grant.tokens}`);
+
+                            let res;
+                            for (let j = 0; j <= i; ++j) {
+                                res = grant.results[j];
+                                // Jump forward in time by the requested diff.
+                                await time.increaseTime(res.diff);
+                            }
+
+                            await trustee.revoke(holder, { from: vester });
+
+                            // Get state after revoke.
+                            let totalVesting2 = (await trustee.totalVesting({ from: someoneElse })).toNumber();
+                            let trusteeBalance2 = (await token.balanceOf(trustee.address, { from: someoneElse })).toNumber();
+                            let userBalance2 = (await token.balanceOf(holder, { from: someoneElse })).toNumber();
+                            let vesterBalance2 = (await token.balanceOf(vester, { from: someoneElse })).toNumber();
+
+                            // Assert state changes.
+                            assert.equal(totalVesting2, 0, `totalVesting2 = ${totalVesting2}, expecting 0`);
+                            assert.equal(trusteeBalance2, 0, `trusteeBalance2 = ${trusteeBalance2}, expecting 0`);
+                            assert.equal(userBalance2, userBalance + res.userBalance,
+                                `userBalance3 = ${userBalance2}, expecting ${userBalance + res.userBalance}`);
+                            assert.equal(vesterBalance2, vesterBalance + res.vesterBalance,
+                                `vesterBalance2 = ${vesterBalance2}, expecting ${vesterBalance + res.vesterBalance}`);
+                        });
+                    }
+                });
         });
     });
 
@@ -785,20 +907,27 @@ contract('VestingTrustee', (accounts) => {
                                 let userBalance = (await token.balanceOf(holder, { from: someoneElse })).toNumber();
                                 let transferred = (await getGrant(holder)).transferred.toNumber();
 
-                                // Jump forward in time by the requested diff.
-                                await time.increaseTime(res.diff);
-                                await trustee.unlockVestedTokens(holder, { from: someoneElse });
+                                const vestingGrant = await getGrant(holder);
+                                const tokensLeft = vestingGrant.value - vestingGrant.transferred;
+                                if (tokensLeft === 0) {
+                                    console.log(`All granted tokens were already transferred. No tokens left to be unlocked`);
+                                    await assertRevert(trustee.unlockVestedTokens(holder, { from: someoneElse }));
+                                } else {
+                                    // Jump forward in time by the requested diff.
+                                    await time.increaseTime(res.diff);
+                                    await trustee.unlockVestedTokens(holder, { from: someoneElse });
 
-                                // Verify new state.
-                                let totalVesting2 = (await trustee.totalVesting({ from: someoneElse })).toNumber();
-                                let trusteeBalance2 = (await token.balanceOf(trustee.address, { from: someoneElse })).toNumber();
-                                let userBalance2 = (await token.balanceOf(holder, { from: someoneElse })).toNumber();
-                                let transferred2 = (await getGrant(holder)).transferred.toNumber();
+                                    // Verify new state.
+                                    let totalVesting2 = (await trustee.totalVesting({ from: someoneElse })).toNumber();
+                                    let trusteeBalance2 = (await token.balanceOf(trustee.address, { from: someoneElse })).toNumber();
+                                    let userBalance2 = (await token.balanceOf(holder, { from: someoneElse })).toNumber();
+                                    let transferred2 = (await getGrant(holder)).transferred.toNumber();
 
-                                assert.approximately(totalVesting2, totalVesting - res.unlocked, MAX_ERROR);
-                                assert.approximately(trusteeBalance2, trusteeBalance - res.unlocked, MAX_ERROR);
-                                assert.approximately(userBalance2, userBalance + res.unlocked, MAX_ERROR);
-                                assert.approximately(transferred2, transferred + res.unlocked, MAX_ERROR);
+                                    assert.approximately(totalVesting2, totalVesting - res.unlocked, MAX_ERROR);
+                                    assert.approximately(trusteeBalance2, trusteeBalance - res.unlocked, MAX_ERROR);
+                                    assert.approximately(userBalance2, userBalance + res.unlocked, MAX_ERROR);
+                                    assert.approximately(transferred2, transferred + res.unlocked, MAX_ERROR);
+                                }
                             }
                         });
                     });

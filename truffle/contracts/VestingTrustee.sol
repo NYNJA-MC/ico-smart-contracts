@@ -8,6 +8,7 @@ import './NYNJACoin.sol';
 /// @author Jose Perez - <jose.perez@diginex.com>
 /// @notice Vesting trustee contract for NYNJACoin ERC20 tokens. Tokens are granted to specific
 ///         addresses and vested under certain criteria (vesting period, cliff period, etc.)
+///         Tokens must be transferred to the VestingTrustee contract address prior to granting them.
 contract VestingTrustee is Ownable {
     using SafeMath for uint256;
 
@@ -25,7 +26,7 @@ contract VestingTrustee is Ownable {
         uint256 end;
         uint256 installmentLength; // In seconds.
         uint256 transferred;
-        bool revokable;
+        bool revocable;
     }
 
     // Holder to grant information mapping.
@@ -56,9 +57,9 @@ contract VestingTrustee is Ownable {
         _;
     }
 
-    // @dev Allows the owner to change the vester.
-    // @param _newVester The address of the new vester.
-    // @return True if the operation was successful.   
+    /// @dev Allows the owner to change the vester.
+    /// @param _newVester The address of the new vester.
+    /// @return True if the operation was successful.
     function transferVester(address _newVester) external onlyOwner returns(bool) {
         require(_newVester != address(0));
 
@@ -68,16 +69,19 @@ contract VestingTrustee is Ownable {
     }
     
 
-    /// @dev Grant tokens to a specified address.
+    /// @dev Grant tokens to a specified address. All time units are in seconds since Unix epoch.
+    ///      Tokens must be transferred to the VestingTrustee contract address prior to calling this
+    ///      function. The number of tokens assigned to the VestingTrustee contract address must
+    //       always be equal or greater than the total number of vested tokens.
     /// @param _to address The holder address.
     /// @param _value uint256 The amount of tokens to be granted.
     /// @param _start uint256 The beginning of the vesting period.
-    /// @param _cliff uint256 Duration of the cliff period (when the first installment is made).
+    /// @param _cliff uint256 Time, between _start and _end, when the first installment is made.
     /// @param _end uint256 The end of the vesting period.
-    /// @param _installmentLength uint256 The length of each vesting installment (in seconds).
-    /// @param _revokable bool Whether the grant is revokable or not.
+    /// @param _installmentLength uint256 The length of each vesting installment.
+    /// @param _revocable bool Whether the grant is revocable or not.
     function grant(address _to, uint256 _value, uint256 _start, uint256 _cliff, uint256 _end,
-        uint256 _installmentLength, bool _revokable)
+        uint256 _installmentLength, bool _revocable)
         external onlyVester {
 
         require(_to != address(0));
@@ -104,7 +108,7 @@ contract VestingTrustee is Ownable {
             end: _end,
             installmentLength: _installmentLength,
             transferred: 0,
-            revokable: _revokable
+            revocable: _revocable
         });
 
         // Since tokens have been granted, increase the total amount of vested tokens.
@@ -114,40 +118,37 @@ contract VestingTrustee is Ownable {
         emit NewGrant(msg.sender, _to, _value);
     }
 
-    /// @dev Revoke the grant of tokens of a specifed address.
+    /// @dev Revoke the grant of tokens of a specified grantee address.
+    ///      The vester can arbitrarily revoke the tokens of a revocable grant anytime.
+    ///      However, the grantee owns `calculateVestedTokens` number of tokens, even if some of them
+    ///      have not been transferred to the grantee yet. Therefore, the `revoke` function should
+    ///      transfer all non-transferred tokens to their rightful owner. The rest of the granted tokens
+    ///      should be transferred to the vester.
     /// @param _holder The address which will have its tokens revoked.
     function revoke(address _holder) public onlyVester {
         Grant memory holderGrant = grants[_holder];
 
-        // Grant must be revokable.
-        require(holderGrant.revokable);
+        // Grant must be revocable.
+        require(holderGrant.revocable);
 
-        // Calculate amount of remaining tokens that are still available to be
-        // returned to owner.
-        uint256 refund = holderGrant.value.sub(holderGrant.transferred);
+        // Calculate number of tokens to be transferred to vester and to holder:
+        // holderGrant.value = toVester + vested = toVester + ( toHolder + holderGrant.transferred )
+        uint256 vested = calculateVestedTokens(holderGrant, now);
+        uint256 toVester = holderGrant.value.sub(vested);
+        uint256 toHolder = vested.sub(holderGrant.transferred);
 
         // Remove grant information.
         delete grants[_holder];
 
-        // Update total vesting amount and transfer previously calculated tokens to owner.
-        totalVesting = totalVesting.sub(refund);
+        // Update totalVesting.
+        totalVesting = totalVesting.sub(toHolder);
+        totalVesting = totalVesting.sub(toVester);
 
-        nynja.transfer(msg.sender, refund);
+        // Transfer tokens.
+        nynja.transfer(_holder, toHolder);
+        nynja.transfer(vester, toVester);
         
-        emit GrantRevoked(_holder, refund);
-    }
-
-    /// @dev Calculate the total amount of vested tokens of a holder at a given time.
-    /// @param _holder address The address of the holder.
-    /// @param _time uint256 The specific time to calculate against.
-    /// @return a uint256 Representing a holder's total amount of vested tokens.
-    function vestedTokens(address _holder, uint256 _time) external view returns (uint256) {
-        Grant memory holderGrant = grants[_holder];
-        if (holderGrant.value == 0) {
-            return 0;
-        }
-
-        return calculateVestedTokens(holderGrant, _time);
+        emit GrantRevoked(_holder, toVester);
     }
 
     /// @dev Calculate amount of vested tokens at a specifc time.
@@ -166,8 +167,7 @@ contract VestingTrustee is Ownable {
         }
 
         // Calculate amount of installments past until now.
-        //
-        // NOTE result gets floored because of integer division.
+        // NOTE: result gets floored because of integer division.
         uint256 installmentsPast = _time.sub(_grant.start).div(_grant.installmentLength);
 
         // Calculate amount of days in entire vesting period.
@@ -177,16 +177,29 @@ contract VestingTrustee is Ownable {
         return _grant.value.mul(installmentsPast.mul(_grant.installmentLength)).div(vestingDays);
     }
 
+    /// @dev Calculate the total amount of vested tokens of a holder at a given time.
+    /// @param _holder address The address of the holder.
+    /// @param _time uint256 The specific time to calculate against.
+    /// @return a uint256 Representing a holder's total amount of vested tokens.
+    function vestedTokens(address _holder, uint256 _time) external view returns (uint256) {
+        Grant memory holderGrant = grants[_holder];
+
+        if (holderGrant.value == 0) {
+            return 0;
+        }
+
+        return calculateVestedTokens(holderGrant, _time);
+    }
+
     /// @dev Unlock vested tokens and transfer them to their holder.
     /// @param _holder address The address of the holder.
-    /// @return a uint256 Representing the amount of vested tokens transferred to their holder.
     function unlockVestedTokens(address _holder) external {
         Grant storage holderGrant = grants[_holder];
 
         // Require that there will be funds left in grant to transfer to holder.
-        require(holderGrant.value != 0);
+        require(holderGrant.value.sub(holderGrant.transferred) > 0);
 
-        // Get the total amount of vested tokens, acccording to grant.
+        // Get the total amount of vested tokens, according to grant.
         uint256 vested = calculateVestedTokens(holderGrant, now);
         if (vested == 0) {
             return;
