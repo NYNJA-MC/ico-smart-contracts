@@ -5,10 +5,9 @@ import "../../node_modules/openzeppelin-solidity/contracts/ownership/Ownable.sol
 /// @title  ExchangeRate
 /// @author Jose Perez - <jose.perez@diginex.com>
 /// @notice Tamper-proof record of exchange rates e.g. BTC/USD, ETC/USD, etc.
-/// @dev    Exchange rates are updated from off-chain server periodically. Rates are taking from a
+/// @dev    Exchange rates are updated from off-chain server periodically. Rates are taken from a
 //          publicly available third-party provider, such as Coinbase, CoinMarketCap, etc.
 contract ExchangeRate is Ownable {
-
     event RateUpdated(string id, uint256 rate);
     event UpdaterTransferred(address indexed previousUpdater, address indexed newUpdater);
 
@@ -16,7 +15,7 @@ contract ExchangeRate is Ownable {
 
     mapping(string => uint256) internal currentRates;
 
-    /// @dev The ExchangeRate construtor.
+    /// @dev The ExchangeRate constructor.
     /// @param _updater Account which can update the rates.
     constructor(address _updater) public {
         require(_updater != address(0));
