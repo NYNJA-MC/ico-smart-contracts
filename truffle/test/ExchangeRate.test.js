@@ -1,6 +1,6 @@
 /// @title  ExchangeRate.test.js
 /// @author Jose Perez - <jose.perez@diginex.com>
-/// @notice VestingTrustee smart contract unit test
+/// @notice ExchangeRate smart contract unit test
 
 'use strict';
 
